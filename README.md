@@ -1,23 +1,36 @@
 TokenExchange
 =============
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for bitcoins.  The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt address, a Bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address specified as a message attached to the transfer transaction.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for bitcoins.  The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt address, a Bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address specified as a message attached to the transfer transaction.  The attached message must be a prunable plain message.
 
-The nxt/addons/conf/token-exchange.properties configuration file controls the operation of the TokenExchange add-on.  It contains the following fields:    
+The token-exchange.properties configuration file controls the operation of the TokenExchange add-on.  The access controls for this file should restrict access since it contains passwords used to access bitcoind and send bitcoins.  The configuration file contains the following fields:    
+
 - exchangeRate=nnn.nnn    
     This specifies the value of a single currency unit in bitcoins.  For example, a value of 0.001 indicates that 1 currency unit is equal to 0.001 bitcoins.
  
 - currency=xxxxx    
     This specifies the 3-5 character Nxt currency code that will be used for the token exchange.
 
-- redemptionAddress=NXT-xxxx-xxxx-xxxx-xxxxx    
-    This specifies the NXT redemption address.  Currency transfers to this address will be processed by the TokenExchange add-on.
+- redemptionAccount=NXT-xxxx-xxxx-xxxx-xxxxx    
+    This specifies the NXT redemption account.  Currency transfers to this address will be processed by the TokenExchange add-on.
     
 - confirmations=n    
     This specifies the number of Nxt confirmations before the bitcoins will be sent to the user.
     
 - bitcoindAddress=host-name:port    
-    This specifies the host name and port of the bitcoind server that will be used to send bitcoins to the user.  Since bitcoind no longer supports SSL connections, the bitcoind server should be running on the same system as the NRS server.
+    This specifies the host name and port of the bitcoind server that will be used to send bitcoins to the user.  Since bitcoind no longer supports SSL connections, the bitcoind server should be running on the same system as the NRS server to avoid security leaks.
+    
+- bitcoindUser=user-name   
+    This specifies the user for RPC requests to the bitcoind server
+    
+- bitcoindPassword=password    
+    This specifies the password for RPC requests to the bitcoind server
+    
+- bitcoindTxFee=n.nnnn    
+    This specifies the bitcoind transaction fee as BTC/KB.  A SEND transaction with one input and two output is around 226 bytes.  If the bitcoindTxFee=0.0004, then the transaction fee calculated by the current version of bitcoind would be 0.0004 * .226 = 0.0000904.  Note that older versions of bitcoind would round the size up to 1KB, resulting in a transaction fee of 0.0004.
+    
+- bitcoindWalletPassphrase=passphrase    
+    This specifies the passphrase needed to unlock an encrypted bitcoind wallet.  It should be omitted if the wallet is not encrypted.
 
     
 Installation
@@ -25,11 +38,13 @@ Installation
 
 - Extract the files to the Nxt installation directory    
 
-- Add 'addons/lib/*' and 'addons/conf' to the java classpath when starting NRS    
-    - Linux and Mac: -cp classes:lib/*:conf:addons/classes:addons/lib/*:addons/conf    
-    - Windows: -cp classes;lib\*conf;addons\classes;addons\lib\*;addons\conf    
+- Copy sample.token-exchange.properties to the 'conf' subdirectory of the NRS application data directory and rename it to token-exchange.properties.  Fill in the configuration parameters for your installation.
 
-- Add 'nxt.addOns=org.ScripterRon.TokenExchange.Main' to nxt.properties. If you have multiple add-ons, separate each add-on name by a semi-colon
+- Add 'addons/lib/*' to the java classpath when starting NRS    
+    - Linux and Mac: -cp classes:lib/*:conf:addons/classes:addons/lib/*    
+    - Windows: -cp classes;lib\*conf;addons\classes;addons\lib\*    
+
+- Add 'nxt.addOns=org.ScripterRon.TokenExchange.TokenAddon' to nxt.properties. If you have multiple add-ons, separate each add-on name by a semi-colon
 
     
 Build
