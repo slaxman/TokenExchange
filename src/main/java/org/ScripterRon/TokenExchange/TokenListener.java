@@ -46,15 +46,15 @@ public class TokenListener implements Runnable {
     /** Blockchain processor */
     private static final BlockchainProcessor blockchainProcessor = Nxt.getBlockchainProcessor();
 
-    /** Bitcoin send failed */
-    private static boolean sendFailed = false;
+    /** Bitcoin send suspended */
+    private static volatile boolean sendSuspended = false;
 
     /**
      * Initialize the token listener
      */
     static void init() {
         //
-        // Add our block listener
+        // Add our block listeners
         //
         blockchainProcessor.addListener((block) -> {
             try {
@@ -63,6 +63,13 @@ public class TokenListener implements Runnable {
                 // Ignored since the queue is unbounded
             }
         }, BlockchainProcessor.Event.BLOCK_PUSHED);
+        blockchainProcessor.addListener((block) -> {
+            try {
+                blockQueue.put(block.getId());
+            } catch (InterruptedException exc) {
+                // Ignored since the queue is unbounded
+            }
+        }, BlockchainProcessor.Event.BLOCK_SCANNED);
         //
         // Start listener thread
         //
@@ -122,10 +129,13 @@ public class TokenListener implements Runnable {
                                 tx.getRecipientId() != TokenAddon.redemptionAccount) {
                             continue;
                         }
+                        if (TokenDb.tokenExists(tx.getId())) {
+                            continue;
+                        }
                         Logger.logDebugMessage("Found token redemption transaction "
                                 + Long.toUnsignedString(tx.getId()) + " from " + Convert.rsAccount(tx.getSenderId()));
                         if (msg == null || !msg.isText()) {
-                            Logger.logErrorMessage("Token redemption transaction does not have a text message");
+                            Logger.logErrorMessage("Token redemption transaction does not have a plain text message");
                             continue;
                         }
                         String bitcoinAddress = Convert.toString(msg.getMessage());
@@ -143,16 +153,22 @@ public class TokenListener implements Runnable {
                 }
                 //
                 // Process pending redemptions that are now confirmed.  We will stop sending bitcoins
-                // if we are unable to communicate with the bitcoind server.
+                // if we are unable to communicate with the bitcoind server.  We also won't send
+                // bitcoins while scanning the block chain.
                 //
-                if (!sendFailed) {
-                    List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
-                    for (TokenTransaction token : tokenList) {
-                        if (!TokenSend.sendBitcoins(token)) {
-                            Logger.logErrorMessage("Unable to send bitcoins; send suspended");
-                            sendFailed = true;
-                            break;
+                if (!sendSuspended && !blockchainProcessor.isScanning()) {
+                    blockchain.readLock();
+                    try {
+                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
+                        for (TokenTransaction token : tokenList) {
+                            if (!TokenSend.sendBitcoins(token)) {
+                                Logger.logErrorMessage("Unable to send bitcoins; send suspended");
+                                sendSuspended = true;
+                                break;
+                            }
                         }
+                    } finally {
+                        blockchain.readUnlock();
                     }
                 }
             }

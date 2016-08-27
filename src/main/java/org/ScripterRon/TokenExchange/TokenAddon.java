@@ -27,6 +27,11 @@ import java.util.Properties;
 
 /**
  * TokenExchange add-on
+ *
+ * TokenExchange listens for currency transfer transactions to the recipient account for the
+ * specified currency.  For each transfer transaction, a token is created and stored in the
+ * token exchange database.  When the required number of confirmations have been received,
+ * bitcoins are sent to the target bitcoin address using the token exchange rate.
  */
 public class TokenAddon implements AddOn {
 
@@ -35,6 +40,9 @@ public class TokenAddon implements AddOn {
 
     /** Token exchange rate */
     static BigDecimal exchangeRate;
+
+    /** Token currency code */
+    static String currencyCode;
 
     /** Token currency identifier */
     static long currencyId;
@@ -87,15 +95,15 @@ public class TokenAddon implements AddOn {
             } catch (RuntimeException exc) {
                 throw new IllegalArgumentException("TokenExchange 'redemptionAccount' property is not a valid account identifier");
             }
-            value = getStringProperty(properties, "currency", true);
-            Currency currency = Currency.getCurrencyByCode(value);
+            currencyCode = getStringProperty(properties, "currency", true);
+            Currency currency = Currency.getCurrencyByCode(currencyCode);
             if (currency == null) {
                 throw new IllegalArgumentException("TokenExchange 'currency' property is not a valid currency");
             }
             currencyId = currency.getId();
             currencyDecimals = currency.getDecimals();
             //
-            // Initialize the database
+            // Initialize the token database
             //
             TokenDb.init();
             //

@@ -67,15 +67,20 @@ public class TokenSend {
         try {
             String params = String.format("[%s]", TokenAddon.bitcoindTxFee.toPlainString());
             issueRequest("settxfee", params);
-            params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
-            issueRequest("walletpassphrase", params);
+            if (TokenAddon.bitcoindWalletPassphrase != null) {
+                params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
+                issueRequest("walletpassphrase", params);
+            }
             BigDecimal bitcoinAmount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
             params = String.format("[\"%s\",%s]", token.getBitcoinAddress(), bitcoinAmount.toPlainString());
             JSONObject response = issueRequest("sendtoaddress", params);
             String bitcoindTxId = (String)response.get("result");
-            issueRequest("walletlock", "[]");
+            if (TokenAddon.bitcoindWalletPassphrase != null) {
+                issueRequest("walletlock", "[]");
+            }
             token.setExchanged(bitcoindTxId);
             TokenDb.updateToken(token);
+            Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress());
             result = true;
         } catch (IOException exc) {
             Logger.logErrorMessage("Unable to send bitcoins", exc);

@@ -67,6 +67,40 @@ public class TokenDb {
         private TokenExchangeTable(String name) {
             super(name);
         }
+
+        /**
+         * Rollback to the specified height
+         *
+         * We need to override the default rollback() method because we
+         * do not want to delete tokens that have been exchanged.
+         *
+         * @param   height      Rollback height
+         */
+        @Override
+        public void rollback(int height) {
+            if (!db.isInTransaction()) {
+                throw new IllegalStateException("Not in transaction");
+            }
+            try (Connection conn = db.getConnection();
+                    PreparedStatement pstmtDelete = conn.prepareStatement(
+                        "DELETE FROM " + table + " WHERE height > ? AND exchanged=false")) {
+                pstmtDelete.setInt(1, height);
+                pstmtDelete.executeUpdate();
+            } catch (SQLException e) {
+                throw new RuntimeException(e.toString(), e);
+            }
+        }
+
+        /**
+         * Truncate the table
+         *
+         * We need to treat this as a rollback to 0 since we do not want
+         * to delete tokens that have been exchanged.
+         */
+        @Override
+        public void truncate() {
+            rollback(0);
+        }
     }
 
     /** TokenExchange table */
@@ -104,6 +138,28 @@ public class TokenDb {
             Logger.logErrorMessage("Unable to initialize TokenExchange database", exc);
             throw new RuntimeException("Unable to initialize TokenExchange database", exc);
         }
+    }
+
+    /**
+     * See if a transaction token exists
+     *
+     * @param   id              Transaction identifier
+     * @return                  TRUE if the transaction token exists
+     */
+    static boolean tokenExists(long id) {
+        boolean exists = false;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT db_id FROM token_exchange WHERE id=?")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    exists = true;
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to check transaction in TokenExchange table", exc);
+        }
+        return exists;
     }
 
     /**
