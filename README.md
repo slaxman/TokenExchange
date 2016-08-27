@@ -32,6 +32,17 @@ The token-exchange.properties configuration file controls the operation of the T
 - bitcoindWalletPassphrase=passphrase    
     This specifies the passphrase needed to unlock an encrypted bitcoind wallet.  It should be omitted if the wallet is not encrypted.
 
+
+TokenExchange API
+=================
+
+TokenExchange provides an NRS API under the ADDONS tag with the request type 'tokenExchange'.  The NRS test page (http://localhost:7876/test) can be used to issue requests or an application can issue its own HTTP requests.  The following functions are available:
+
+  - Get the current status of the TokenExchange add-on.  Specify 'requestType=tokenExchange&function=status' in the HTTP request.
+  - List currency tokens that have been redeemed.  Specify 'requestType=tokenExchange&function=list&height=n' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.
+  - Stop sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxxx' in the HTTP request.  Redeemed tokens will still be added to the database but bitcoins will not be sent until sending is resumed or the NRS server is restarted.
+  - Resume sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxx' in the HTTP request.  Bitcoins will be sent for pending confirmed tokens and normal processing will resume.
+
     
 Installation
 ============
