@@ -9,7 +9,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
-        <nxtpeer.version>1.10.1</nxtpeer.version>
+        <nxtpeer.version>1.10.1.1</nxtpeer.version>
     </properties>
     <name>NRS Token Exchange</name>
     <url>https://github.com/ScripterRon/TokenExchange</url>

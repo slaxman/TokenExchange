@@ -39,6 +39,7 @@ public class TokenDb {
     private static final String tableDefinition = "CREATE TABLE IF NOT EXISTS token_exchange ("
             + "db_id IDENTITY,"
             + "id BIGINT NOT NULL,"
+            + "sender BIGINT NOT NULL,"
             + "height INT NOT NULL,"
             + "exchanged BOOLEAN NOT NULL,"
             + "token_amount BIGINT NOT NULL,"
@@ -129,8 +130,8 @@ public class TokenDb {
                     stmt.execute(tableDefinition);
                     stmt.execute(indexDefinition);
                     stmt.executeUpdate("INSERT INTO token_exchange "
-                            + "(id,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                            + "VALUES(0,0,false,"+dbVersion+",0,'Database version')");
+                            + "(id,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                            + "VALUES(0,0,0,false,"+dbVersion+",0,'Database version')");
                     Logger.logInfoMessage("Version "+dbVersion+" TokenExchange database created");
                 }
             }
@@ -238,13 +239,14 @@ public class TokenDb {
     static void storeToken(TokenTransaction tx) {
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange "
-                        + "(id,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                        + "VALUES(?,?,false,?,?,?)")) {
+                        + "(id,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                        + "VALUES(?,?,?,false,?,?,?)")) {
             stmt.setLong(1, tx.getId());
-            stmt.setInt(2, tx.getHeight());
-            stmt.setLong(3, tx.getTokenAmount());
-            stmt.setLong(4, tx.getBitcoinAmount());
-            stmt.setString(5, tx.getBitcoinAddress());
+            stmt.setLong(2, tx.getSenderId());
+            stmt.setInt(3, tx.getHeight());
+            stmt.setLong(4, tx.getTokenAmount());
+            stmt.setLong(5, tx.getBitcoinAmount());
+            stmt.setString(6, tx.getBitcoinAddress());
             stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store transaction in TokenExchange table", exc);

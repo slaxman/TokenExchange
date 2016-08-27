@@ -189,6 +189,9 @@ public class TokenAddon implements AddOn {
         return result;
     }
 
+    /**
+     * Shutdown the TokenExchange add-on
+     */
     @Override
     public void shutdown() {
         TokenListener.shutdown();
@@ -196,14 +199,24 @@ public class TokenAddon implements AddOn {
         Logger.logInfoMessage("TokenExchange add-on shutdown");
     }
 
+    /**
+     * Get our API request handler
+     *
+     * @return                  API request handler
+     */
     @Override
     public APIServlet.APIRequestHandler getAPIRequestHandler() {
-        return null;
+        return new TokenAPI();
     }
 
+    /**
+     * Get our API request type
+     *
+     * @return                  API request type
+     */
     @Override
     public String getAPIRequestType() {
-        return null;
+        return "tokenExchange";
     }
 
 }

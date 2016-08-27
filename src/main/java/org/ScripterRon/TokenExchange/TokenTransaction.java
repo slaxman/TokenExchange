@@ -26,6 +26,9 @@ class TokenTransaction {
     /** Transaction identifier */
     private final long id;
 
+    /** Sender account id */
+    private final long senderId;
+
     /** Bitcoin transaction id */
     private String bitcoinTxId;
 
@@ -48,13 +51,15 @@ class TokenTransaction {
      * Create a token transaction
      *
      * @param   id              Transaction identifier
+     * @param   senderId        Sender identifier
      * @param   height          Block height
      * @param   tokenAmount     Token amount
      * @param   bitcoinAmount   Bitcoin amount
      * @param   bitcoinAddress  Bitcoin address
      */
-    TokenTransaction(long id, int height, long tokenAmount, long bitcoinAmount, String bitcoinAddress) {
+    TokenTransaction(long id, long senderId, int height, long tokenAmount, long bitcoinAmount, String bitcoinAddress) {
         this.id = id;
+        this.senderId = senderId;
         this.height = height;
         this.tokenAmount = tokenAmount;
         this.bitcoinAmount = bitcoinAmount;
@@ -70,6 +75,7 @@ class TokenTransaction {
      */
     TokenTransaction(ResultSet rs) throws SQLException {
         this.id = rs.getLong("id");
+        this.senderId = rs.getLong("sender");
         this.height = rs.getInt("height");
         this.tokenAmount = rs.getLong("token_amount");
         this.bitcoinAmount = rs.getLong("bitcoin_amount");
@@ -89,6 +95,15 @@ class TokenTransaction {
      */
     long getId() {
         return id;
+    }
+
+    /**
+     * Return the sender identifier
+     *
+     * @return                  Sender identifier
+     */
+    long getSenderId() {
+        return senderId;
     }
 
     /**

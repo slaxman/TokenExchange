@@ -91,6 +91,31 @@ public class TokenListener implements Runnable {
     }
 
     /**
+     * Check if bitcoin send is suspended
+     *
+     * @return                  TRUE if send is suspended
+     */
+    static boolean isSuspended() {
+        return sendSuspended;
+    }
+
+    /**
+     * Suspend bitcoin send
+     */
+    static void suspendSend() {
+        sendSuspended = true;
+        Logger.logInfoMessage("Bitcoin send suspended");
+    }
+
+    /**
+     * Resume bitcoin send
+     */
+    static void resumeSend() {
+        sendSuspended = false;
+        Logger.logInfoMessage("Bitcoin send resumed");
+    }
+
+    /**
      * Process new blocks
      */
     @Override
@@ -142,8 +167,8 @@ public class TokenListener implements Runnable {
                         long units = transfer.getUnits();
                         BigDecimal tokenAmount = BigDecimal.valueOf(units, TokenAddon.currencyDecimals);
                         BigDecimal bitcoinAmount = tokenAmount.multiply(TokenAddon.exchangeRate);
-                        TokenTransaction token = new TokenTransaction(tx.getId(), block.getHeight(),
-                                    units, bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
+                        TokenTransaction token = new TokenTransaction(tx.getId(), tx.getSenderId(),
+                                block.getHeight(), units, bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
                         TokenDb.storeToken(token);
                         Logger.logDebugMessage("Redeeming " + tokenAmount.toPlainString() + " units for "
                                     + bitcoinAmount.toPlainString() + " BTC to " + bitcoinAddress);
