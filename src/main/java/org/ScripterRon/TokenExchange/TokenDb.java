@@ -24,6 +24,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * TokenExchange database support
@@ -47,77 +49,23 @@ public class TokenDb {
     /** Database index definition */
     private static final String indexDefinition = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_idx ON token_exchange(id)";
 
-    /** Database table */
+    /**
+     * Database table
+     *
+     * A DerivedDbTable provides rollback() and truncate() methods which
+     * a called by the block chain processor when blocks are popped off.
+     * So we only need to worry about adding rows to the table as new
+     * blocks are pushed.
+     */
     private static class TokenExchangeTable extends DerivedDbTable {
 
         /**
          * Initialize the table
-         */
-        private TokenExchangeTable() {
-            super("token_exchange");
-        }
-
-        /**
-         * Load a token
          *
-         * @param   id          Transaction identifier
-         * @return              Token or null
+         * @param   name        Table name
          */
-        private TokenTransaction load(long id) {
-            TokenTransaction tx = null;
-            try (Connection conn = db.getConnection();
-                    PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange WHERE id=?")) {
-                stmt.setLong(1, id);
-                ResultSet rs = stmt.executeQuery();
-                if (rs.next()) {
-                    tx = new TokenTransaction(rs.getLong("id"), rs.getInt("height"), rs.getLong("token_amount"),
-                                              rs.getLong("bitcoin_amount"), rs.getString("bitcoin_address"));
-                    if (rs.getBoolean("exchanged")) {
-                        tx.setExchanged(rs.getString("bitcoin_id"));
-                    }
-                }
-            } catch (SQLException exc) {
-                Logger.logErrorMessage("Unable to load transaction from TokenExchange table", exc);
-            }
-            return tx;
-        }
-
-        /**
-         * Store a token
-         *
-         * @param   token       Token
-         */
-        private void store(TokenTransaction tx) {
-            try (Connection conn = db.getConnection();
-                    PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange "
-                            + "(id,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                            + "VALUES(?,?,false,?,?,?)")) {
-                stmt.setLong(1, tx.getId());
-                stmt.setInt(2, tx.getHeight());
-                stmt.setLong(3, tx.getTokenAmount());
-                stmt.setLong(4, tx.getBitcoinAmount());
-                stmt.setString(5, tx.getBitcoinAddress());
-                stmt.executeUpdate();
-            } catch (SQLException exc) {
-                Logger.logErrorMessage("Unable to store transaction in TokenExchange table", exc);
-            }
-        }
-
-        /**
-         * Update the token exchange status
-         *
-         * @param   token       Token
-         */
-        private void update(TokenTransaction tx) {
-            try (Connection conn = db.getConnection();
-                    PreparedStatement stmt = conn.prepareStatement("UPDATE token_exchange "
-                            + "SET exchanged=true,bitcoin_id=? WHERE id=?")) {
-                stmt.setString(1, tx.getBitcoinTxId());
-                stmt.setLong(2, tx.getId());
-                stmt.executeUpdate();
-            } catch (SQLException exc) {
-                Logger.logErrorMessage("Unable to update transaction in TokenExchange table", exc);
-            }
+        private TokenExchangeTable(String name) {
+            super(name);
         }
     }
 
@@ -129,19 +77,20 @@ public class TokenDb {
      */
     static void init() {
         try {
-            table = new TokenExchangeTable();
+            table = new TokenExchangeTable("token_exchange");
             try (Connection conn = Db.db.getConnection();
                     Statement stmt = conn.createStatement()) {
                 try {
-                    ResultSet rs = stmt.executeQuery("SELECT token_amount FROM token_exchange WHERE id=0");
-                    if (!rs.next()) {
-                        throw new SQLException("TokenExchange table is corrupted - recreating");
+                    try (ResultSet rs = stmt.executeQuery("SELECT token_amount FROM token_exchange WHERE id=0")) {
+                        if (!rs.next()) {
+                            throw new SQLException("TokenExchange table is corrupted - recreating");
+                        }
+                        int version = rs.getInt("token_amount");
+                        if (version != dbVersion) {
+                            throw new RuntimeException("Version " + version + " TokenExchange database is not supported");
+                        }
+                        Logger.logInfoMessage("Using Version " + version + " TokenExchange database");
                     }
-                    int version = rs.getInt("token_amount");
-                    if (version != dbVersion) {
-                        throw new RuntimeException("Version " + version + " TokenExchange database is not supported");
-                    }
-                    Logger.logInfoMessage("Using Version " + version + " TokenExchange database");
                 } catch (SQLException exc) {
                     stmt.execute(tableDefinition);
                     stmt.execute(indexDefinition);
@@ -161,26 +110,105 @@ public class TokenDb {
      * Get a token transaction
      *
      * @param   id              Transaction identifier
+     * @return                  Transaction token or null if an error occurred
      */
     static TokenTransaction getToken(long id) {
-        return table.load(id);
+        TokenTransaction tx = null;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange WHERE id=?")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    tx = new TokenTransaction(rs);
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to load transaction from TokenExchange table", exc);
+        }
+        return tx;
+    }
+
+    /**
+     * Get tokens above the specified height
+     *
+     * @param   height          Block height
+     * @return                  List of transaction tokens
+     */
+    static List<TokenTransaction> getTokens(int height) {
+        List<TokenTransaction> txList = new ArrayList<>();
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange "
+                        + "WHERE height>? ORDER BY HEIGHT ASC")) {
+            stmt.setInt(1, Math.max(1, height));
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    txList.add(new TokenTransaction(rs));
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get list of pending transactions from TokenExchange table", exc);
+        }
+        return txList;
+    }
+
+    /**
+     * Get pending transaction tokens at or below the specified height
+     *
+     * @param   height          Block height
+     * @return                  List of transaction tokens
+     */
+    static List<TokenTransaction> getPendingTokens(int height) {
+        List<TokenTransaction> txList = new ArrayList<>();
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange "
+                        + "WHERE height>0 AND height<=? AND exchanged=false ORDER BY HEIGHT ASC")) {
+            stmt.setInt(1, height);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    txList.add(new TokenTransaction(rs));
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get list of pending transactions from TokenExchange table", exc);
+        }
+        return txList;
     }
 
     /**
      * Store a new token transaction
      *
-     * @param   token           Token transaction
+     * @param   tx              Token transaction
      */
-    static void storeToken(TokenTransaction token) {
-        table.store(token);
+    static void storeToken(TokenTransaction tx) {
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange "
+                        + "(id,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                        + "VALUES(?,?,false,?,?,?)")) {
+            stmt.setLong(1, tx.getId());
+            stmt.setInt(2, tx.getHeight());
+            stmt.setLong(3, tx.getTokenAmount());
+            stmt.setLong(4, tx.getBitcoinAmount());
+            stmt.setString(5, tx.getBitcoinAddress());
+            stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to store transaction in TokenExchange table", exc);
+        }
     }
 
     /**
      * Update the token exchange status
      *
-     * @param   token           Token transaction
+     * @param   tx              Token transaction
      */
-    static void updateToken(TokenTransaction token) {
-        table.update(token);
+    static void updateToken(TokenTransaction tx) {
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE token_exchange "
+                        + "SET exchanged=true,bitcoin_id=? WHERE id=?")) {
+            stmt.setString(1, tx.getBitcoinTxId());
+            stmt.setLong(2, tx.getId());
+            stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to update transaction in TokenExchange table", exc);
+        }
     }
 }

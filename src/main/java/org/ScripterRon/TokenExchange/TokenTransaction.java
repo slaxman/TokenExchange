@@ -15,6 +15,9 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
 /**
  * Token transaction
  */
@@ -57,6 +60,26 @@ class TokenTransaction {
         this.bitcoinAmount = bitcoinAmount;
         this.bitcoinAddress = bitcoinAddress;
         this.exchanged = false;
+    }
+
+    /**
+     * Create a token transaction
+     *
+     * @param   rs              Result set
+     * @throws  SQLException    SQL error
+     */
+    TokenTransaction(ResultSet rs) throws SQLException {
+        this.id = rs.getLong("id");
+        this.height = rs.getInt("height");
+        this.tokenAmount = rs.getLong("token_amount");
+        this.bitcoinAmount = rs.getLong("bitcoin_amount");
+        this.bitcoinAddress = rs.getString("bitcoin_address");
+        if (rs.getBoolean("exchanged")) {
+            this.exchanged = true;
+            this.bitcoinTxId = rs.getString("bitcoin_id");
+        } else {
+            this.exchanged = false;
+        }
     }
 
     /**

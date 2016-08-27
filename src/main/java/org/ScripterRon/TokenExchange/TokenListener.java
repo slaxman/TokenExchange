@@ -46,6 +46,9 @@ public class TokenListener implements Runnable {
     /** Blockchain processor */
     private static final BlockchainProcessor blockchainProcessor = Nxt.getBlockchainProcessor();
 
+    /** Bitcoin send failed */
+    private static boolean sendFailed = false;
+
     /**
      * Initialize the token listener
      */
@@ -87,11 +90,17 @@ public class TokenListener implements Runnable {
     public void run() {
         Logger.logInfoMessage("TokenExchange block listener started");
         try {
+            //
+            // Loop until 0 is pushed on to the stack
+            //
             while (true) {
                 long blockId = blockQueue.take();
                 if (blockId == 0) {
                     break;
                 }
+                //
+                // Process the transactions in the block
+                //
                 blockchain.readLock();
                 try {
                     Block block = blockchain.getBlock(blockId);
@@ -131,6 +140,20 @@ public class TokenListener implements Runnable {
                     }
                 } finally {
                     blockchain.readUnlock();
+                }
+                //
+                // Process pending redemptions that are now confirmed.  We will stop sending bitcoins
+                // if we are unable to communicate with the bitcoind server.
+                //
+                if (!sendFailed) {
+                    List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
+                    for (TokenTransaction token : tokenList) {
+                        if (!TokenSend.sendBitcoins(token)) {
+                            Logger.logErrorMessage("Unable to send bitcoins; send suspended");
+                            sendFailed = true;
+                            break;
+                        }
+                    }
                 }
             }
             Logger.logInfoMessage("TokenExchange block listened stopped");
