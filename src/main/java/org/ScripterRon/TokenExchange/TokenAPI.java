@@ -60,12 +60,13 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
     /**
      * Process the API request
      *
-     * @param   req             HTTP request
-     * @return                  HTTP response
+     * @param   req                 HTTP request
+     * @return                      HTTP response
+     * @throws  ParameterException  Parameter error detected
      */
     @SuppressWarnings("unchecked")
     @Override
-    protected JSONStreamAware processRequest(HttpServletRequest req) {
+    protected JSONStreamAware processRequest(HttpServletRequest req) throws ParameterException {
         JSONObject response = new JSONObject();
         String function = Convert.emptyToNull(req.getParameter("function"));
         String heightString = Convert.emptyToNull(req.getParameter("height"));
@@ -122,11 +123,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 if (adminPassword == null) {
                     return missing("adminPassword");
                 }
-                try {
-                    API.verifyPassword(req);
-                } catch (ParameterException exc) {
-                    return exc.getErrorResponse();
-                }
+                API.verifyPassword(req);
                 TokenListener.suspendSend();
                 response.put("suspended", TokenListener.isSuspended());
                 break;
@@ -134,11 +131,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 if (adminPassword == null) {
                     return missing("adminPassword");
                 }
-                try {
-                    API.verifyPassword(req);
-                } catch (ParameterException exc) {
-                    return exc.getErrorResponse();
-                }
+                API.verifyPassword(req);
                 TokenListener.resumeSend();
                 response.put("suspended", TokenListener.isSuspended());
                 break;
