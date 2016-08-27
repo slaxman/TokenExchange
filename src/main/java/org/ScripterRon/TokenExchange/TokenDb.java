@@ -189,13 +189,16 @@ public class TokenDb {
      * Get tokens above the specified height
      *
      * @param   height          Block height
+     * @param   exchanged       TRUE to return exchanged tokens
      * @return                  List of transaction tokens
      */
-    static List<TokenTransaction> getTokens(int height) {
+    static List<TokenTransaction> getTokens(int height, boolean exchanged) {
         List<TokenTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange "
-                        + "WHERE height>? ORDER BY HEIGHT ASC")) {
+                        + "WHERE height>? "
+                        + (exchanged ? "" : "AND exchanged=false ")
+                        + "ORDER BY height ASC")) {
             stmt.setInt(1, Math.max(1, height));
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -268,5 +271,26 @@ public class TokenDb {
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to update transaction in TokenExchange table", exc);
         }
+    }
+
+    /**
+     * Delete a token
+     *
+     * @param   id              Token identifier
+     * @return                  TRUE if the token was deleeted
+     */
+    static boolean deleteToken(long id) {
+        if (id == 0) {
+            return false;
+        }
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM token_exchange WHERE id=?")) {
+            stmt.setLong(1, id);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to delete transaction from TokenExchange table", exc);
+        }
+        return count!=0;
     }
 }

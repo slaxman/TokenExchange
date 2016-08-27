@@ -39,7 +39,8 @@ TokenExchange API
 TokenExchange provides an NRS API under the ADDONS tag with the request type 'tokenExchange'.  The NRS test page (http://localhost:7876/test) can be used to issue requests or an application can issue its own HTTP requests.  The following functions are available:
 
   - Get the current status of the TokenExchange add-on.  Specify 'requestType=tokenExchange&function=status' in the HTTP request.
-  - List currency tokens that have been redeemed.  Specify 'requestType=tokenExchange&function=list&height=n' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.
+  - List currency tokens that have been redeemed.  Specify 'requestType=tokenExchange&function=list&height=n&exchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.  The 'exchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only unexchanged tokens are returned if 'false' is specified or the parameter is omitted.
+  - Delete an entry in the token exchange database.  Specify 'requestType=tokenExchange&function=delete&id=string&adminPassword=xxxxxx' in the HTTP request.
   - Stop sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxxx' in the HTTP request.  Redeemed tokens will still be added to the database but bitcoins will not be sent until sending is resumed or the NRS server is restarted.
   - Resume sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxx' in the HTTP request.  Bitcoins will be sent for pending confirmed tokens and normal processing will resume.
 

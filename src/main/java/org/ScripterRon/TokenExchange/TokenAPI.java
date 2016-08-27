@@ -40,7 +40,11 @@ import nxt.http.API;
  * <li>list - Returns a transaction token list.  The 'height' parameter
  * can be used to specify the starting height, otherwise a height of 0 is used.
  * Transaction tokens at a height greater than the specified height
- * will be returned.
+ * will be returned.  The 'exchanged' parameter can be used to return exchanged
+ * tokens in addition to unexchanged tokens.
+ * <li>delete - Delete a token from the database.  The 'id' parameter specifies the
+ * token to be deleted.  The 'adminPassword' parameter must be specified to supply
+ * the NRS administrator password.
  * <li>resume - Resume sending bitcoins for redeemed tokens.  The 'adminPassword'
  * parameter must be specified to supply the NRS administrator password.
  * <li>status - Returns the current status of the TokenExchange add-on
@@ -54,7 +58,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
      * Create the API request handler
      */
     public TokenAPI() {
-        super(new APITag[] {APITag.ADDONS}, "function", "height", "adminPassword");
+        super(new APITag[] {APITag.ADDONS}, "function", "id", "exchanged", "height", "adminPassword");
     }
 
     /**
@@ -69,6 +73,8 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
     protected JSONStreamAware processRequest(HttpServletRequest req) throws ParameterException {
         JSONObject response = new JSONObject();
         String function = Convert.emptyToNull(req.getParameter("function"));
+        String idString = Convert.emptyToNull(req.getParameter("id"));
+        String exchangedString = Convert.emptyToNull(req.getParameter("exchanged"));
         String heightString = Convert.emptyToNull(req.getParameter("height"));
         String adminPassword = Convert.emptyToNull(req.getParameter("adminPassword"));
         if (function == null) {
@@ -89,6 +95,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
 
             case "list":
                 int height;
+                boolean exchanged;
                 if (heightString == null) {
                     height = 0;
                 } else {
@@ -98,26 +105,43 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         return incorrect("height", exc.getMessage());
                     }
                 }
-                List<TokenTransaction> tokenList = TokenDb.getTokens(height);
+                if (exchangedString == null) {
+                    exchanged = false;
+                } else {
+                    exchanged = Boolean.valueOf(exchangedString);
+                }
+                List<TokenTransaction> tokenList = TokenDb.getTokens(height, exchanged);
                 JSONArray tokenArray = new JSONArray();
                 tokenList.forEach((token) -> {
-                   JSONObject tokenObject = new JSONObject();
-                   tokenObject.put("id", Long.toUnsignedString(token.getId()));
-                   tokenObject.put("sender", Long.toUnsignedString(token.getSenderId()));
-                   tokenObject.put("senderRS", Convert.rsAccount(token.getSenderId()));
-                   tokenObject.put("height", token.getHeight());
-                   tokenObject.put("exchanged", token.isExchanged());
-                   tokenObject.put("tokenAmount",
-                           BigDecimal.valueOf(token.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
-                   tokenObject.put("bitcoinAmount",
-                           BigDecimal.valueOf(token.getBitcoinAmount(), 8).toPlainString());
-                   tokenObject.put("bitcoinAddress", token.getBitcoinAddress());
-                   if (token.getBitcoinTxId() != null) {
-                       tokenObject.put("bitcoinTxId", token.getBitcoinTxId());
-                   }
-                   tokenArray.add(tokenObject);
+                    JSONObject tokenObject = new JSONObject();
+                    tokenObject.put("id", Long.toUnsignedString(token.getId()));
+                    tokenObject.put("sender", Long.toUnsignedString(token.getSenderId()));
+                    tokenObject.put("senderRS", Convert.rsAccount(token.getSenderId()));
+                    tokenObject.put("height", token.getHeight());
+                    tokenObject.put("exchanged", token.isExchanged());
+                    tokenObject.put("tokenAmount",
+                            BigDecimal.valueOf(token.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
+                    tokenObject.put("bitcoinAmount",
+                            BigDecimal.valueOf(token.getBitcoinAmount(), 8).toPlainString());
+                    tokenObject.put("bitcoinAddress", token.getBitcoinAddress());
+                    if (token.getBitcoinTxId() != null) {
+                        tokenObject.put("bitcoinTxId", token.getBitcoinTxId());
+                    }
+                    tokenArray.add(tokenObject);
                 });
                 response.put("tokens", tokenArray);
+                break;
+            case "delete":
+                if (adminPassword == null) {
+                    return missing("adminPassword");
+                }
+                API.verifyPassword(req);
+                if (idString == null) {
+                    return missing("id");
+                }
+                long id = Long.parseUnsignedLong(idString);
+                boolean deleted = TokenDb.deleteToken(id);
+                response.put("deleted", deleted);
                 break;
             case "suspend":
                 if (adminPassword == null) {
