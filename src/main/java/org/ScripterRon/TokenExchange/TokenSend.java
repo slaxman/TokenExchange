@@ -56,6 +56,9 @@ public class TokenSend {
         }
     }
 
+    /** Bitcoind sendtoaddress transaction size */
+    private static final BigDecimal sendTxSize = BigDecimal.valueOf(0.226);
+
     /**
      * Send bitcoins
      *
@@ -65,23 +68,59 @@ public class TokenSend {
     static boolean sendBitcoins(TokenTransaction token) {
         boolean result = false;
         try {
+            JSONObject response;
+            //
+            // Ensure the necessary funds are available
+            //
+            BigDecimal bitcoinAmount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
+            BigDecimal bitcoinFee = TokenAddon.bitcoindTxFee.multiply(sendTxSize);
+            response = issueRequest("getbalance", "[]");
+            Object resultObject = response.get("result");
+            BigDecimal bitcoinBalance;
+            if (resultObject instanceof Double) {
+                bitcoinBalance = BigDecimal.valueOf((Double)resultObject);
+            } else if (resultObject instanceof Long) {
+                bitcoinBalance = BigDecimal.valueOf((Long)resultObject);
+            } else if (resultObject instanceof String) {
+                bitcoinBalance = new BigDecimal((String)resultObject);
+            } else {
+                throw new IOException("Unrecognized result returned for 'getbalance'");
+            }
+            if (bitcoinAmount.add(bitcoinFee).compareTo(bitcoinBalance) > 0) {
+                throw new IOException("Unable to send " + bitcoinAmount.toPlainString() +
+                        " BTC: Insufficient funds in wallet");
+            }
+            //
+            // Set the desired transaction fee in BTC/KB
+            //
             String params = String.format("[%s]", TokenAddon.bitcoindTxFee.toPlainString());
             issueRequest("settxfee", params);
+            //
+            // Unlock the wallet - it will lock automatically in 15
+            //
             if (TokenAddon.bitcoindWalletPassphrase != null) {
                 params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
                 issueRequest("walletpassphrase", params);
             }
-            BigDecimal bitcoinAmount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
+            //
+            // Send the bitcoins
+            //
             params = String.format("[\"%s\",%s]", token.getBitcoinAddress(), bitcoinAmount.toPlainString());
-            JSONObject response = issueRequest("sendtoaddress", params);
+            response = issueRequest("sendtoaddress", params);
             String bitcoindTxId = (String)response.get("result");
-            if (TokenAddon.bitcoindWalletPassphrase != null) {
-                issueRequest("walletlock", "[]");
-            }
+            //
+            // Mark the token as exchanged
+            //
             token.setExchanged(bitcoindTxId);
             TokenDb.updateToken(token);
             Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress());
             result = true;
+            //
+            // Lock the wallet once more
+            //
+            if (TokenAddon.bitcoindWalletPassphrase != null) {
+                issueRequest("walletlock", "[]");
+            }
         } catch (IOException exc) {
             Logger.logErrorMessage("Unable to send bitcoins", exc);
         }
@@ -92,7 +131,7 @@ public class TokenSend {
      * Issue the Bitcoin RPC request and return the parsed JSON response
      *
      * @param       requestType             Request type
-     * @param       requestParams           Request parameters in JSON format or null if no parameters
+     * @param       requestParams           Request parameters in JSON format
      * @return                              Parsed JSON response
      * @throws      IOException             Unable to issue Bitcoin RPC request
      * @throws      ParseException          Unable to parse the Bitcoin RPC response
@@ -103,13 +142,8 @@ public class TokenSend {
         try {
             URL url = new URL(String.format("http://%s/", TokenAddon.bitcoindAddress));
             String request;
-            if (requestParams != null) {
-                request = String.format("{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"params\": %s, \"id\": %d}",
-                                        requestType, requestParams, id);
-            } else {
-                request = String.format("{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"id\": %d}",
-                                        requestType, id);
-            }
+            request = String.format("{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"params\": %s, \"id\": %d}",
+                                    requestType, requestParams, id);
             //Logger.logDebugMessage(String.format("Issue HTTP request to %s: %s", TokenAddon.bitcoindAddress, request));
             byte[] requestBytes = request.getBytes("UTF-8");
             //
@@ -133,7 +167,7 @@ public class TokenSend {
                 out.flush();
                 int code = conn.getResponseCode();
                 if (code != HttpURLConnection.HTTP_OK) {
-                    String errorText = String.format("Response code %d for %s request: %s",
+                    String errorText = String.format("Response code %d for '%s' request: %s",
                                                      code, requestType, conn.getResponseMessage());
                     throw new IOException(errorText);
                 }
@@ -145,7 +179,7 @@ public class TokenSend {
                 response = (JSONObject)JSONValue.parseWithException(in);
                 JSONObject errorResponse = (JSONObject)response.get("error");
                 if (errorResponse != null) {
-                    String errorText = String.format("Error %d returned for %s request: %s",
+                    String errorText = String.format("Error %d returned for '%s' request: %s",
                                 errorResponse.get("code"), requestType, errorResponse.get("message"));
                     throw new IOException(errorText);
                 }
@@ -154,9 +188,9 @@ public class TokenSend {
         } catch (MalformedURLException exc) {
             throw new IOException("Malformed Bitcoin RPC URL", exc);
         } catch (ParseException exc) {
-            throw new IOException("JSON parse exception for " + requestType + " request: " + exc.getMessage());
+            throw new IOException("JSON parse exception for '" + requestType + "' request: " + exc.getMessage());
         } catch (IOException exc) {
-            String errorText = String.format("I/O error on %s request: %s", requestType, exc.getMessage());
+            String errorText = String.format("I/O error on '%s' request: %s", requestType, exc.getMessage());
             throw new IOException(errorText);
         }
         return response;

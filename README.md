@@ -1,7 +1,11 @@
 TokenExchange
 =============
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for bitcoins.  The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt address, a Bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address specified as a message attached to the transfer transaction.  The attached message must be a prunable plain message.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for bitcoins and issuing Nxt currency when receiving bitcoins.  
+
+The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt address, a Bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a prunable plain message.
+
+The bitcoind 'blocknotify' and 'walletnotify' routines must be defined in bitcoin.conf.  The 'blocknotify' routine must issue a TokenExchange 'blockReceived' request.  The 'walletnotify' routine must issue a TokenExchange 'transactionReceived' request.  The bitcoin address must have been associated with a Nxt account using a TokenExchange 'getAddress' request.  These addresses are defined in the bitcoind wallet as well as in the TokenExchange database, so changing either the bitcoind wallet or the NRS server will invalidate the association.
 
 The token-exchange.properties configuration file controls the operation of the TokenExchange add-on.  The access controls for this file should restrict access since it contains passwords used to access bitcoind and send bitcoins.  The configuration file contains the following fields:    
 
@@ -36,13 +40,18 @@ The token-exchange.properties configuration file controls the operation of the T
 TokenExchange API
 =================
 
-TokenExchange provides an NRS API under the ADDONS tag with the request type 'tokenExchange'.  The NRS test page (http://localhost:7876/test) can be used to issue requests or an application can issue its own HTTP requests.  The following functions are available:
+TokenExchange provides an NRS API under the ADDONS tag with 'requestType=tokenExchange'.  The NRS test page (http://localhost:7876/test) can be used to issue requests or an application can issue its own HTTP requests (http://localhost:7876/nxt?requestType=tokenExchange&function=name).  The NRS server administrator password is required for these requests (adminPassword=password).
 
-  - Get the current status of the TokenExchange add-on.  Specify 'requestType=tokenExchange&function=status' in the HTTP request.
-  - List currency tokens that have been redeemed.  Specify 'requestType=tokenExchange&function=list&height=n&exchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.  The 'exchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only unexchanged tokens are returned if 'false' is specified or the parameter is omitted.
-  - Delete an entry in the token exchange database.  Specify 'requestType=tokenExchange&function=delete&id=string&adminPassword=xxxxxx' in the HTTP request.
-  - Stop sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxxx' in the HTTP request.  Redeemed tokens will still be added to the database but bitcoins will not be sent until sending is resumed or the NRS server is restarted.
-  - Resume sending bitcoins for redeemed tokens.  Specify 'requestType=tokenExchange&adminPassword=xxxxx' in the HTTP request.  Bitcoins will be sent for pending confirmed tokens and normal processing will resume.
+The following functions are available:
+
+  - Get the current status of the TokenExchange add-on.  Specify 'function=getStatus' in the HTTP request.
+  - List currency tokens that have been redeemed.  Specify 'function=getTokens&height=n&includeExchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.  The 'includeExchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only unexchanged tokens are returned if 'false' is specified or the parameter is omitted.
+  - Delete an entry in the token exchange database.  Specify 'function=deleteToken&id=string' in the HTTP request.
+  - Request a bitcoin address and associate it with a Nxt account.  Specify 'function=requestAddress&account=nxt-address&publicKey=hex-string'.  Bitcoins sent to this address will then result in tokens be issued to the associated Nxt account.  The public key should be specified for a new account to increase the security of the account.
+  - Notification that a new bitcoin block has been received.  Specify 'function=blockReceived&id=id-string'.  This request is issued by the bitcoind 'blocknotify' routine.
+  - Notification that a new wallet transaction has been received.  Specify 'function=transactionReceived&id=id-string'.  This request is issued by the bitcoind 'walletnotity' routine.
+  - Stop sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=suspendSend' in the HTTP request.  Redeemed tokens and bitcoin deposits will still be added to the database but the requests will not be processed until sending is resumed or the NRS server is restarted.
+  - Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resumeSend' in the HTTP request.  Pending requests will be processed and normal processing will resume.
 
     
 Installation
@@ -50,13 +59,17 @@ Installation
 
 - Extract the files to the Nxt installation directory    
 
-- Copy sample.token-exchange.properties to the 'conf' subdirectory of the NRS application data directory and rename it to token-exchange.properties.  Fill in the configuration parameters for your installation.
+- Copy token-exchange.properties to the 'conf' subdirectory of the NRS application data directory.  Fill in the configuration parameters for your installation.  Read access should be restricted to the NRS application.
 
 - Add 'addons/lib/*' to the java classpath when starting NRS    
     - Linux and Mac: -cp classes:lib/*:conf:addons/classes:addons/lib/*    
     - Windows: -cp classes;lib\*conf;addons\classes;addons\lib\*    
 
 - Add 'nxt.addOns=org.ScripterRon.TokenExchange.TokenAddon' to nxt.properties. If you have multiple add-ons, separate each add-on name by a semi-colon
+
+- Add 'blocknotify' and 'walletnotify' to bitcoin.conf.  Sample shell scripts are included in the TokenExchange directory.  Copy them to a directory of your choice and set the administrator password for your NRS server.  Read access should be restricted to the bitcoind application.  For example:    
+    - blocknotify=/path-to-script/blocknotify.sh %s    
+    - walletnotify=/path-to-script/walletnotify.sh %s    
 
     
 Build

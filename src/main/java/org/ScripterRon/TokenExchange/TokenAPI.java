@@ -30,26 +30,32 @@ import java.util.Arrays;
 import java.util.List;
 
 import javax.servlet.http.HttpServletRequest;
-import nxt.http.API;
 
 /**
  * <p>TokenExchange API
  *
  * <p>The following functions are provided:
  * <ul>
- * <li>list - Returns a transaction token list.  The 'height' parameter
+ * <li>blockReceived - Notification that a new bitcoin block has been received.  The
+ * 'id' parameter specifies the block identifier.
+ * <li>deleteToken - Delete a token from the database.  The 'id' parameter specifies the
+ * token to be deleted.
+ * <li>getAddress - Get a new bitcoin address and associate it with a Nxt account.
+ * The 'account' parameter identifies the Nxt account.  The 'publicKey' parameter
+ * can be specified to further identify the Nxt account and should be specified for
+ * a new Nxt account.
+ * <li>getStatus - Returns the current status of the TokenExchange add-on.
+ * <li>getTokens - Returns a transaction token list.  The 'height' parameter
  * can be used to specify the starting height, otherwise a height of 0 is used.
  * Transaction tokens at a height greater than the specified height
- * will be returned.  The 'exchanged' parameter can be used to return exchanged
+ * will be returned.  The 'includeExchanged' parameter can be used to return exchanged
  * tokens in addition to unexchanged tokens.
- * <li>delete - Delete a token from the database.  The 'id' parameter specifies the
- * token to be deleted.  The 'adminPassword' parameter must be specified to supply
- * the NRS administrator password.
- * <li>resume - Resume sending bitcoins for redeemed tokens.  The 'adminPassword'
- * parameter must be specified to supply the NRS administrator password.
- * <li>status - Returns the current status of the TokenExchange add-on
- * <li>suspend - Stop sending bitcoins for redeemed tokens.  The 'adminPassword'
- * parameter must be specified to supply the NRS administrator password.
+ * <li>resumeSend - Resume sending bitcoins for redeemed tokens and issuing tokens for received
+ * bitcoins.
+ * <li>suspendSend - Stop sending bitcoins for redeemed tokens and issuing tokens for received
+ * bitcoins.
+ * <li>transactionReceived -Notification that a new bitcoin transaction has been received.  The
+ * 'id' parameter specifies the transaction identifier.
  * </ul>
  */
 public class TokenAPI extends APIServlet.APIRequestHandler {
@@ -58,7 +64,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
      * Create the API request handler
      */
     public TokenAPI() {
-        super(new APITag[] {APITag.ADDONS}, "function", "id", "exchanged", "height", "adminPassword");
+        super(new APITag[] {APITag.ADDONS}, "function", "id", "includeExchanged", "height", "account", "publicKey");
     }
 
     /**
@@ -74,14 +80,15 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         JSONObject response = new JSONObject();
         String function = Convert.emptyToNull(req.getParameter("function"));
         String idString = Convert.emptyToNull(req.getParameter("id"));
-        String exchangedString = Convert.emptyToNull(req.getParameter("exchanged"));
+        String accountString = Convert.emptyToNull(req.getParameter("account"));
+        String publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
+        String includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
         String heightString = Convert.emptyToNull(req.getParameter("height"));
-        String adminPassword = Convert.emptyToNull(req.getParameter("adminPassword"));
         if (function == null) {
             return missing("function");
         }
         switch (function) {
-            case "status":
+            case "getStatus":
                 response.put("exchangeRate", TokenAddon.exchangeRate.toPlainString());
                 response.put("currencyCode", TokenAddon.currencyCode);
                 response.put("currencyId", Long.toUnsignedString(TokenAddon.currencyId));
@@ -93,9 +100,9 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("suspended", TokenListener.isSuspended());
                 break;
 
-            case "list":
+            case "getTokens":
                 int height;
-                boolean exchanged;
+                boolean includeExchanged;
                 if (heightString == null) {
                     height = 0;
                 } else {
@@ -105,12 +112,12 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         return incorrect("height", exc.getMessage());
                     }
                 }
-                if (exchangedString == null) {
-                    exchanged = false;
+                if (includeExchangedString == null) {
+                    includeExchanged = false;
                 } else {
-                    exchanged = Boolean.valueOf(exchangedString);
+                    includeExchanged = Boolean.valueOf(includeExchangedString);
                 }
-                List<TokenTransaction> tokenList = TokenDb.getTokens(height, exchanged);
+                List<TokenTransaction> tokenList = TokenDb.getTokens(height, includeExchanged);
                 JSONArray tokenArray = new JSONArray();
                 tokenList.forEach((token) -> {
                     JSONObject tokenObject = new JSONObject();
@@ -131,11 +138,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 });
                 response.put("tokens", tokenArray);
                 break;
-            case "delete":
-                if (adminPassword == null) {
-                    return missing("adminPassword");
-                }
-                API.verifyPassword(req);
+            case "deleteToken":
                 if (idString == null) {
                     return missing("id");
                 }
@@ -143,21 +146,24 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 boolean deleted = TokenDb.deleteToken(id);
                 response.put("deleted", deleted);
                 break;
-            case "suspend":
-                if (adminPassword == null) {
-                    return missing("adminPassword");
-                }
-                API.verifyPassword(req);
+            case "suspendSend":
                 TokenListener.suspendSend();
                 response.put("suspended", TokenListener.isSuspended());
                 break;
-            case "resume":
-                if (adminPassword == null) {
-                    return missing("adminPassword");
-                }
-                API.verifyPassword(req);
+            case "resumeSend":
                 TokenListener.resumeSend();
                 response.put("suspended", TokenListener.isSuspended());
+                break;
+            case "getAddress":
+                response.put("address", "not-a-valid-address");
+                break;
+            case "blockReceived":
+                nxt.util.Logger.logDebugMessage("Block " + idString + " received");
+                response.put("processed", true);
+                break;
+            case "transactionReceived":
+                nxt.util.Logger.logDebugMessage("Transaction " + idString + " received");
+                response.put("processed", true);
                 break;
             default:
                 return unknown(function);
@@ -219,6 +225,16 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
      */
     @Override
     protected boolean requirePost() {
+        return true;
+    }
+
+    /**
+     * Require the administrator password
+     *
+     * @return                  TRUE if adminPassword is required
+     */
+    @Override
+    protected boolean requirePassword() {
         return true;
     }
 

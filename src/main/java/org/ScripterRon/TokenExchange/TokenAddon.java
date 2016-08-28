@@ -23,6 +23,7 @@ import nxt.util.Convert;
 import nxt.util.Logger;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.util.Properties;
 
 /**
@@ -116,6 +117,8 @@ public class TokenAddon implements AddOn {
             initialized = true;
         } catch (IllegalArgumentException exc) {
             Logger.logErrorMessage(exc.getMessage());
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to intialize the TokenExchange database", exc);
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to initialize the TokenExchange add-on", exc);
         }
@@ -206,7 +209,7 @@ public class TokenAddon implements AddOn {
      */
     @Override
     public APIServlet.APIRequestHandler getAPIRequestHandler() {
-        return new TokenAPI();
+        return initialized ? new TokenAPI() : null;
     }
 
     /**
@@ -218,5 +221,4 @@ public class TokenAddon implements AddOn {
     public String getAPIRequestType() {
         return "tokenExchange";
     }
-
 }
