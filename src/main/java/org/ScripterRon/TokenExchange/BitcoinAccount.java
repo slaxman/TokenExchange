@@ -37,7 +37,7 @@ class BitcoinAccount {
      *
      * @param   address         Bitcoin address
      * @param   accountId       Nxt account identifier
-     * @param   publicKey       Nxt account public key (may be null)
+     * @param   publicKey       Nxt account public key (null if no public key)
      */
     BitcoinAccount(String address, long accountId, byte[] publicKey) {
         this.bitcoinAddress = address;

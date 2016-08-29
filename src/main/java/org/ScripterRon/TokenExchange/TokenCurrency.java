@@ -41,11 +41,15 @@ public class TokenCurrency {
             long unitBalance = currency.getUnconfirmedUnits();
             List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
             for (BitcoinTransaction tx : txList) {
+                String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
                 BitcoinTransaction update = BitcoinProcessor.getTransaction(tx.getBitcoinTxId());
-                if (update == null || update.getConfirmations() < TokenAddon.confirmations) {
+                if (update == null) {
+                    Logger.logWarningMessage("Bitcoin wallet transaction " + bitcoinTxId + " was not found");
                     continue;
                 }
-                String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
+                if (update.getConfirmations() < TokenAddon.confirmations) {
+                    continue;
+                }
                 long units = tx.getTokenAmount();
                 if (units > unitBalance) {
                     Logger.logErrorMessage("Insufficient currency units available to process Bitcoin transaction " +
@@ -56,8 +60,7 @@ public class TokenCurrency {
                 Attachment attachment = new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
                 Transaction.Builder builder = Nxt.newTransactionBuilder(TokenAddon.publicKey,
                         0, 0, (short)1440, attachment);
-                builder.recipientId(tx.getAccountId())
-                       .timestamp(Nxt.getBlockchain().getLastBlockTimestamp());
+                builder.recipientId(tx.getAccountId()).timestamp(Nxt.getBlockchain().getLastBlockTimestamp());
                 Transaction transaction = builder.build(TokenAddon.secretPhrase);
                 if (transaction.getFeeNQT() > nxtBalance) {
                     Logger.logErrorMessage("Insufficient NXT available to process Bitcoin transaction " +

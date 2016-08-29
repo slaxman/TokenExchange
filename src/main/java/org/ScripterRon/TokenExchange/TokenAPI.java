@@ -73,7 +73,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
     /** Bitcoin processing lock */
     private static final Object bitcoinLock = new Object();
 
-    /** Processing bitcoin transactions */
+    /** Processing Bitcoin transactions */
     private static volatile boolean processingTransactions = false;
 
     /**

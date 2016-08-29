@@ -42,15 +42,15 @@ public class BitcoinProcessor {
     private static final long MIN_VERSION = 130000L;
 
     /** Connect timeout (milliseconds) */
-    private static final int nodeConnectTimeout = 5000;
+    private static final int nodeConnectTimeout = 2000;
 
     /** Read timeout (milliseconds) */
-    private static final int nodeReadTimeout = 30000;
+    private static final int nodeReadTimeout = 5000;
 
     /** Request identifier */
     private static final AtomicLong requestId = new AtomicLong(0);
 
-    /** Basic authentication string */
+    /** Basic authentication */
     private static String encodedAuthentication;
     static {
         try {
@@ -61,13 +61,13 @@ public class BitcoinProcessor {
         }
     }
 
-    /** Bitcoind sendtoaddress transaction size */
+    /** Bitcoin sendtoaddress transaction size (one input, two outputs) */
     private static final BigDecimal sendTxSize = BigDecimal.valueOf(0.226);
 
     /**
      * Initialize the Bitcoin processor
      *
-     * @throws  IllegalArgumentException    Bitcoin server not support
+     * @throws  IllegalArgumentException    Bitcoin server version not supported
      * @throws  IOException                 I/O error occurred
      */
     static void init() throws IllegalArgumentException, IOException {
@@ -78,7 +78,7 @@ public class BitcoinProcessor {
         if (version < MIN_VERSION) {
             throw new IllegalArgumentException("Bitcoin wallet version " + version + " is not supported");
         }
-        Logger.logInfoMessage("Bitcoin wallet version " + version + ", balance " + balance.toPlainString() + " BTC");
+        Logger.logInfoMessage("Bitcoin wallet version " + version + ", Balance " + balance.toPlainString() + " BTC");
     }
 
     /**
@@ -108,7 +108,7 @@ public class BitcoinProcessor {
             String params = String.format("[%s]", TokenAddon.bitcoindTxFee.toPlainString());
             issueRequest("settxfee", params);
             //
-            // Unlock the wallet - it will lock automatically in 15
+            // Unlock the wallet - it will lock automatically in 15 seconds
             //
             if (TokenAddon.bitcoindWalletPassphrase != null) {
                 params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
@@ -143,10 +143,10 @@ public class BitcoinProcessor {
     }
 
     /**
-     * Get a confirmed transaction
+     * Get a wallet transaction
      *
      * @param   txid            Bitcoin transaction identifier
-     * @return                  Bitcoin transaction or null if not found or not confirmed
+     * @return                  Bitcoin transaction or null if not found
      */
     @SuppressWarnings("unchecked")
     static BitcoinTransaction getTransaction(byte[] txid) {
@@ -189,7 +189,7 @@ public class BitcoinProcessor {
         String params;
         try {
             //
-            // Unlock the wallet - it will lock automatically in 15
+            // Unlock the wallet - it will lock automatically in 15 seconds
             //
             if (TokenAddon.bitcoindWalletPassphrase != null) {
                 params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
@@ -248,10 +248,11 @@ public class BitcoinProcessor {
         JSONObject response = null;
         try {
             URL url = new URL(String.format("http://%s/", TokenAddon.bitcoindAddress));
-            String request;
-            request = String.format("{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"params\": %s, \"id\": %d}",
-                                    requestType, requestParams, id);
-            //Logger.logDebugMessage(String.format("Issue HTTP request to %s: %s", TokenAddon.bitcoindAddress, request));
+            String request = String.format("{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"params\": %s, \"id\": %d}",
+                                           requestType, requestParams, id);
+            if (TokenAddon.bitcoindLogging) {
+                Logger.logDebugMessage(String.format("Issuing HTTP request to %s: %s", TokenAddon.bitcoindAddress, request));
+            }
             byte[] requestBytes = request.getBytes("UTF-8");
             //
             // Issue the request
@@ -291,7 +292,9 @@ public class BitcoinProcessor {
                     throw new IOException(errorText);
                 }
             }
-            //Logger.logDebugMessage(String.format("Request complete\n%s", nxt.util.JSON.toString(response)));
+            if (TokenAddon.bitcoindLogging) {
+                Logger.logDebugMessage(String.format("Request complete\n%s", nxt.util.JSON.toJSONString(response)));
+            }
         } catch (MalformedURLException exc) {
             throw new IOException("Malformed Bitcoin RPC URL", exc);
         } catch (ParseException exc) {

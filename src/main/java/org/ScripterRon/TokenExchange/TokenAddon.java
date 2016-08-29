@@ -34,7 +34,7 @@ import java.util.Properties;
  * TokenExchange listens for currency transfer transactions to the recipient account for the
  * specified currency.  For each transfer transaction, a token is created and stored in the
  * token exchange database.  When the required number of confirmations have been received,
- * bitcoins are sent to the target bitcoin address using the token exchange rate.
+ * Bitcoins are sent to the target Bitcoin address using the token exchange rate.
  */
 public class TokenAddon implements AddOn {
 
@@ -86,6 +86,9 @@ public class TokenAddon implements AddOn {
     /** Bitcoind transaction fee */
     static BigDecimal bitcoindTxFee;
 
+    /** Bitcoind RPC logging */
+    static boolean bitcoindLogging;
+
     /**
      * Initialize the TokenExchange add-on
      */
@@ -120,6 +123,7 @@ public class TokenAddon implements AddOn {
             bitcoindUser = getStringProperty(properties, "bitcoindUser", true);
             bitcoindPassword = getStringProperty(properties, "bitcoindPassword", true);
             bitcoindWalletPassphrase = getStringProperty(properties, "bitcoindWalletPassphrase", false);
+            bitcoindLogging = getBooleanProperty(properties, "bitcoindLogging", false);
             secretPhrase = getStringProperty(properties, "secretPhrase", true);
             publicKey = Crypto.getPublicKey(secretPhrase);
             accountId = Account.getId(publicKey);
@@ -184,6 +188,22 @@ public class TokenAddon implements AddOn {
             value = null;
         }
         return value;
+    }
+
+    /**
+     * Process a boolean property
+     *
+     * @param   properties      Properties
+     * @param   name            Property name
+     * @param   required        TRUE if this is a required property
+     * @return                  Property value or 'false' if not specified
+     */
+    private boolean getBooleanProperty(Properties properties, String name, boolean required) {
+        String value = getStringProperty(properties, name, required);
+        if (value == null) {
+            return false;
+        }
+        return Boolean.valueOf(value);
     }
 
     /**
