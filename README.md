@@ -15,8 +15,8 @@ The token-exchange.properties configuration file controls the operation of the T
 - currency=xxxxx    
     This specifies the 3-5 character Nxt currency code that will be used for the token exchange.
 
-- redemptionAccount=NXT-xxxx-xxxx-xxxx-xxxxx    
-    This specifies the NXT redemption account.  Currency transfers to this address will be processed by the TokenExchange add-on.
+- secretPhrase=secret-phrase
+    This specifies the NXT account used to issue token currency and process redemption requests.
     
 - confirmations=n    
     This specifies the number of Nxt confirmations before the bitcoins will be sent to the user.
@@ -45,13 +45,15 @@ TokenExchange provides an NRS API under the ADDONS tag with 'requestType=tokenEx
 The following functions are available:
 
   - Get the current status of the TokenExchange add-on.  Specify 'function=getStatus' in the HTTP request.
-  - List currency tokens that have been redeemed.  Specify 'function=getTokens&height=n&includeExchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.  The 'includeExchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only unexchanged tokens are returned if 'false' is specified or the parameter is omitted.
+  - List currency tokens that have been redeemed.  Specify 'function=getTokens&height=n&includeExchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified height.  The height defaults to 0 if it is not specified.  The 'includeExchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only pending tokens are returned if 'false' is specified or the parameter is omitted.
   - Delete an entry in the token exchange database.  Specify 'function=deleteToken&id=string' in the HTTP request.
-  - Request a bitcoin address and associate it with a Nxt account.  Specify 'function=requestAddress&account=nxt-address&publicKey=hex-string'.  Bitcoins sent to this address will then result in tokens be issued to the associated Nxt account.  The public key should be specified for a new account to increase the security of the account.
-  - Notification that a new bitcoin block has been received.  Specify 'function=blockReceived&id=id-string'.  This request is issued by the bitcoind 'blocknotify' routine.
-  - Notification that a new wallet transaction has been received.  Specify 'function=transactionReceived&id=id-string'.  This request is issued by the bitcoind 'walletnotity' routine.
-  - Stop sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=suspendSend' in the HTTP request.  Redeemed tokens and bitcoin deposits will still be added to the database but the requests will not be processed until sending is resumed or the NRS server is restarted.
-  - Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resumeSend' in the HTTP request.  Pending requests will be processed and normal processing will resume.
+  - Get the bitcoin address associated with a Nxt account.  Specify 'function=requestAddress&account=nxt-address&publicKey=hex-string' in the HTTP request.  Bitcoins sent to this address will then result in tokens be issued to the associated Nxt account.  The public key is optional but should be specified for a new account to increase the security of the account.  A new address will be generated if the Nxt account does not already have an address.
+  - List bitcoin addresses that are associated with NXT users. Specify 'function=getAccounts&account=n&address=s' in the HTTP request.  Specify 'account' to return the bitcoin address associated with that NXT account or specify 'address' to return the NXT account associated with that bitcoin address.  All addresses are returned if neither parameter is specified.
+  - List transactions received by the Bitcoin wallet for addresses associated with NXT accounts.  Specify 'function=getTransactions&address=s&includeExchanged=true/false' in the HTTP request.  Specify the 'address' parameter to limit the list to transactions for that address.  Otherwise, all transactions are returned.  Specify the 'includeExchanged' parameter to return transactions that have been processed as well as pending transactions.
+  - Notification that a new bitcoin block has been received.  Specify 'function=blockReceived&id=id-string' in the HTTP request.  This request is issued by the bitcoind 'blocknotify' routine and is not intended for users.
+  - Notification that a new wallet transaction has been received.  Specify 'function=transactionReceived&id=id-string' in the HTTP request.  This request is issued by the bitcoind 'walletnotity' routine and is not intended for users.
+  - Stop sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=suspend' in the HTTP request.  Redeemed tokens and bitcoin deposits will still be added to the database but the requests will not be processed until sending is resumed or the NRS server is restarted.
+  - Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resume' in the HTTP request.  Pending requests will be processed and normal processing will resume.
 
     
 Installation

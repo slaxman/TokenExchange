@@ -146,7 +146,7 @@ public class TokenDb {
                 Statement stmt = conn.createStatement()) {
             int version = 0;
             try {
-                try (ResultSet rs = stmt.executeQuery("SELECT token_amount FROM token_exchange WHERE id=0")) {
+                try (ResultSet rs = stmt.executeQuery("SELECT token_amount FROM token_exchange WHERE nxt_txid=0")) {
                     if (!rs.next()) {
                         throw new SQLException("TokenExchange database is corrupted - recreating");
                     }
@@ -420,6 +420,27 @@ public class TokenDb {
     }
 
     /**
+     * Get the Nxt accounts associated with Bitcoin addresses
+     *
+     * @return                  Account list
+     */
+    static List<BitcoinAccount> getAccounts() {
+        List<BitcoinAccount> accountList = new ArrayList<>();
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange_account "
+                        + "ORDER BY db_id")) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    accountList.add(new BitcoinAccount(rs));
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get accounts from TokenExchange table", exc);
+        }
+        return accountList;
+    }
+
+    /**
      * Store a Bitcoin transaction
      *
      * @param   tx              Bitcoin transaction
@@ -429,12 +450,13 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange_transaction "
-                        + "(bitcoin_txid,bitcoin_address,bitcoin_amount,account_id,exchanged,nxt_txid) "
-                        + "VALUES(?,?,?,?,false,0)")) {
+                        + "(bitcoin_txid,bitcoin_address,bitcoin_amount,token_amount,account_id,exchanged,nxt_txid) "
+                        + "VALUES(?,?,?,?,?,false,0)")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
             stmt.setString(2, tx.getBitcoinAddress());
             stmt.setLong(3, tx.getBitcoinAmount());
-            stmt.setLong(4, tx.getAccountId());
+            stmt.setLong(4, tx.getTokenAmount());
+            stmt.setLong(5, tx.getAccountId());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store transaction in TokenExchange table", exc);
@@ -488,14 +510,21 @@ public class TokenDb {
     /**
      * Get the Bitcoin transactions
      *
+     * @param   address         Bitcoin address or null for all addresses
      * @param   exchanged       Include processed transactions
      * @return                  Bitcoin transaction list
      */
-    static List<BitcoinTransaction> getTransactions(boolean exchanged) {
+    static List<BitcoinTransaction> getTransactions(String address, boolean exchanged) {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange_transaction "
-                        + (exchanged ? "" : "WHERE exchanged=false ") + "ORDER BY db_id")) {
+                        + (address!=null ? (exchanged ? "WHERE bitcoin_address=? " :
+                                                        "WHERE bitcoin_address=? AND exchanged=false ") :
+                                           (exchanged ? "" : "WHERE exchanged=false "))
+                        + "ORDER BY db_id")) {
+            if (address != null) {
+                stmt.setString(1, address);
+            }
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     txList.add(new BitcoinTransaction(rs));

@@ -38,6 +38,9 @@ import java.util.List;
  */
 public class BitcoinProcessor {
 
+    /** Minimum wallet version */
+    private static final long MIN_VERSION = 130000L;
+
     /** Connect timeout (milliseconds) */
     private static final int nodeConnectTimeout = 5000;
 
@@ -60,6 +63,23 @@ public class BitcoinProcessor {
 
     /** Bitcoind sendtoaddress transaction size */
     private static final BigDecimal sendTxSize = BigDecimal.valueOf(0.226);
+
+    /**
+     * Initialize the Bitcoin processor
+     *
+     * @throws  IllegalArgumentException    Bitcoin server not support
+     * @throws  IOException                 I/O error occurred
+     */
+    static void init() throws IllegalArgumentException, IOException {
+        JSONObject response = issueRequest("getwalletinfo", "[]");
+        response = (JSONObject)response.get("result");
+        long version = (Long)response.get("walletversion");
+        BigDecimal balance = getNumber(response.get("balance"));
+        if (version < MIN_VERSION) {
+            throw new IllegalArgumentException("Bitcoin wallet version " + version + " is not supported");
+        }
+        Logger.logInfoMessage("Bitcoin wallet version " + version + ", balance " + balance.toPlainString() + " BTC");
+    }
 
     /**
      * Send Bitcoins
@@ -105,7 +125,8 @@ public class BitcoinProcessor {
             //
             token.setExchanged(Convert.parseHexString(bitcoindTxId));
             TokenDb.updateToken(token);
-            Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress());
+            Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress()
+                    + ", Transaction " + bitcoindTxId);
             result = true;
             //
             // Lock the wallet once more
@@ -135,21 +156,19 @@ public class BitcoinProcessor {
             JSONObject response = issueRequest("gettransaction", params);
             response = (JSONObject)response.get("result");
             int confirmations = ((Long)response.get("confirmations")).intValue();
-            if (confirmations > 0) {
-                List<JSONObject> detailList = (List<JSONObject>)response.get("details");
-                for (JSONObject detail : detailList) {
-                    if (((String)detail.get("category")).equals("receive")) {
-                        String address = (String)detail.get("address");
-                        BitcoinAccount account = TokenDb.getAccount(address);
-                        if (account != null) {
-                            BigDecimal bitcoinAmount = getNumber(detail.get("amount"));
-                            BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                            tx = new BitcoinTransaction(txid, address, account.getAccountId(),
-                                    bitcoinAmount.movePointRight(8).longValue(),
-                                    tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue(),
-                                    confirmations);
-                            break;
-                        }
+            List<JSONObject> detailList = (List<JSONObject>)response.get("details");
+            for (JSONObject detail : detailList) {
+                if (((String)detail.get("category")).equals("receive")) {
+                    String address = (String)detail.get("address");
+                    BitcoinAccount account = TokenDb.getAccount(address);
+                    if (account != null) {
+                        BigDecimal bitcoinAmount = getNumber(detail.get("amount"));
+                        BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
+                        tx = new BitcoinTransaction(txid, address, account.getAccountId(),
+                                bitcoinAmount.movePointRight(8).longValue(),
+                                tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue(),
+                                confirmations);
+                        break;
                     }
                 }
             }

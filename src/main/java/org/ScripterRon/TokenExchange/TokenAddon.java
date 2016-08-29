@@ -15,9 +15,11 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.Account;
 import nxt.Currency;
 import nxt.Nxt;
 import nxt.addons.AddOn;
+import nxt.crypto.Crypto;
 import nxt.http.APIServlet;
 import nxt.util.Convert;
 import nxt.util.Logger;
@@ -36,8 +38,14 @@ import java.util.Properties;
  */
 public class TokenAddon implements AddOn {
 
+    /** Minimum NRS version */
+    private static final int[] MIN_VERSION = new int[] {1, 10, 2};
+
     /** Add-on initialized */
     private static boolean initialized = false;
+
+    /** Add-on processing suspended */
+    private static volatile boolean suspended = false;
 
     /** Token exchange rate */
     static BigDecimal exchangeRate;
@@ -51,8 +59,14 @@ public class TokenAddon implements AddOn {
     /** Token currency decimals */
     static int currencyDecimals;
 
-    /** Token redemption account */
-    static long redemptionAccount;
+    /** Token account secret phrase */
+    static String secretPhrase;
+
+    /** Token account public key */
+    static byte[] publicKey;
+
+    /** Token account identifier */
+    static long accountId;
 
     /** Number of confirmations */
     static int confirmations;
@@ -79,6 +93,22 @@ public class TokenAddon implements AddOn {
     public void init() {
         try {
             //
+            // Verify the NRS version
+            //
+            String[] nrsVersion = Nxt.VERSION.split("\\.");
+            if (nrsVersion.length != MIN_VERSION.length) {
+                throw new IllegalArgumentException("NRS version " + Nxt.VERSION + " is too short");
+            }
+            for (int i=0; i<nrsVersion.length; i++) {
+                int v = Integer.valueOf(nrsVersion[i]);
+                if (v > MIN_VERSION[i]) {
+                    break;
+                }
+                if (v < MIN_VERSION[i]) {
+                    throw new IllegalArgumentException("NRS version " + Nxt.VERSION + " is not supported");
+                }
+            }
+            //
             // Process the token-exchange.properties configuration file
             //
             Properties properties = new Properties();
@@ -90,12 +120,9 @@ public class TokenAddon implements AddOn {
             bitcoindUser = getStringProperty(properties, "bitcoindUser", true);
             bitcoindPassword = getStringProperty(properties, "bitcoindPassword", true);
             bitcoindWalletPassphrase = getStringProperty(properties, "bitcoindWalletPassphrase", false);
-            String value = getStringProperty(properties, "redemptionAccount", true);
-            try {
-                redemptionAccount = Convert.parseAccountId(value);
-            } catch (RuntimeException exc) {
-                throw new IllegalArgumentException("TokenExchange 'redemptionAccount' property is not a valid account identifier");
-            }
+            secretPhrase = getStringProperty(properties, "secretPhrase", true);
+            publicKey = Crypto.getPublicKey(secretPhrase);
+            accountId = Account.getId(publicKey);
             currencyCode = getStringProperty(properties, "currency", true);
             Currency currency = Currency.getCurrencyByCode(currencyCode);
             if (currency == null) {
@@ -103,10 +130,21 @@ public class TokenAddon implements AddOn {
             }
             currencyId = currency.getId();
             currencyDecimals = currency.getDecimals();
+            Account account = Account.getAccount(accountId);
+            Logger.logInfoMessage("TokenExchange account " + Convert.rsAccount(accountId) + " has "
+                    + BigDecimal.valueOf(account.getUnconfirmedBalanceNQT(), 8).toPlainString()
+                    + " NXT");
+            Logger.logInfoMessage("TokenExchange account " + Convert.rsAccount(accountId) + " has "
+                    + BigDecimal.valueOf(Account.getUnconfirmedCurrencyUnits(accountId, currencyId), currencyDecimals).toPlainString()
+                    + " units of currency " + currencyCode);
             //
             // Initialize the token database
             //
             TokenDb.init();
+            //
+            // Initialize the Bitcoin processor
+            //
+            BitcoinProcessor.init();
             //
             // Initialize the token listener
             //
@@ -220,5 +258,30 @@ public class TokenAddon implements AddOn {
     @Override
     public String getAPIRequestType() {
         return "tokenExchange";
+    }
+
+    /**
+     * Check if processing is suspended
+     *
+     * @return                  TRUE if send is suspended
+     */
+    static boolean isSuspended() {
+        return suspended;
+    }
+
+    /**
+     * Suspend processing
+     */
+    static void suspend() {
+        suspended = true;
+        Logger.logWarningMessage("TokenExchange processing suspended");
+    }
+
+    /**
+     * Resume processing
+     */
+    static void resume() {
+        suspended = false;
+        Logger.logInfoMessage("TokenExchange processing resumed");
     }
 }

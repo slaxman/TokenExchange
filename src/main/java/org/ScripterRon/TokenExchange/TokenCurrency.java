@@ -15,6 +15,16 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.Account;
+import nxt.Attachment;
+import nxt.Nxt;
+import nxt.Transaction;
+import nxt.util.Convert;
+import nxt.util.Logger;
+
+import java.math.BigDecimal;
+import java.util.List;
+
 /**
  * Issue Nxt currency after receiving Bitcoins
  */
@@ -24,6 +34,49 @@ public class TokenCurrency {
      * Process Bitcoin transactions after a new Bitcoin block has been received
      */
     static void processTransactions() {
-
+        try {
+            Account account = Account.getAccount(TokenAddon.accountId);
+            long nxtBalance = account.getUnconfirmedBalanceNQT();
+            Account.AccountCurrency currency = Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
+            long unitBalance = currency.getUnconfirmedUnits();
+            List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
+            for (BitcoinTransaction tx : txList) {
+                BitcoinTransaction update = BitcoinProcessor.getTransaction(tx.getBitcoinTxId());
+                if (update == null || update.getConfirmations() < TokenAddon.confirmations) {
+                    continue;
+                }
+                String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
+                long units = tx.getTokenAmount();
+                if (units > unitBalance) {
+                    Logger.logErrorMessage("Insufficient currency units available to process Bitcoin transaction " +
+                            bitcoinTxId + ", processing suspended");
+                    TokenAddon.suspend();
+                    break;
+                }
+                Attachment attachment = new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
+                Transaction.Builder builder = Nxt.newTransactionBuilder(TokenAddon.publicKey,
+                        0, 0, (short)1440, attachment);
+                builder.recipientId(tx.getAccountId())
+                       .timestamp(Nxt.getBlockchain().getLastBlockTimestamp());
+                Transaction transaction = builder.build(TokenAddon.secretPhrase);
+                if (transaction.getFeeNQT() > nxtBalance) {
+                    Logger.logErrorMessage("Insufficient NXT available to process Bitcoin transaction " +
+                            bitcoinTxId + ", processing suspended");
+                    TokenAddon.suspend();
+                    break;
+                }
+                Nxt.getTransactionProcessor().broadcast(transaction);
+                tx.setExchanged(transaction.getId());
+                TokenDb.updateTransaction(tx);
+                nxtBalance -= transaction.getFeeNQT();
+                unitBalance -= units;
+                Logger.logInfoMessage("Issued " + BigDecimal.valueOf(units, TokenAddon.currencyDecimals).toPlainString()
+                        + " units of " + TokenAddon.currencyCode + " to " + Convert.rsAccount(tx.getAccountId())
+                        + ", Transaction " + Long.toUnsignedString(transaction.getId()));
+            }
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to processing Bitcoin transactions, processing suspended", exc);
+            TokenAddon.suspend();
+        }
     }
 }

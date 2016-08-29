@@ -75,7 +75,7 @@ class BitcoinTransaction {
      */
     BitcoinTransaction(ResultSet rs) throws SQLException {
         this.bitcoinTxId = rs.getBytes("bitcoin_txid");
-        this.bitcoinAddress = rs.getString("address");
+        this.bitcoinAddress = rs.getString("bitcoin_address");
         this.bitcoinAmount = rs.getLong("bitcoin_amount");
         this.tokenAmount = rs.getLong("token_amount");
         this.accountId = rs.getLong("account_id");

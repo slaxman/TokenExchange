@@ -3,17 +3,3 @@ TokenExchange Change Log
 
 Version 1.0.0
   - Initial release
-
-  
-Installation
-============
-
-- Extract the files to the Nxt installation directory    
-
-- Copy sample.token-exchange.properties to the 'conf' subdirectory of the NRS application data directory and rename it to token-exchange.properties.  Fill in the configuration parameters for your installation.
-
-- Add 'addons/lib/*' to the java classpath when starting NRS    
-    - Linux and Mac: -cp classes:lib/*:conf:addons/classes:addons/lib/*    
-    - Windows: -cp classes;lib\*conf;addons\classes;addons\lib\*    
-
-- Add 'nxt.addOns=org.ScripterRon.TokenExchange.TokenAddon' to nxt.properties. If you have multiple add-ons, separate each add-on name by a semi-colon

@@ -46,9 +46,6 @@ public class TokenListener implements Runnable {
     /** Blockchain processor */
     private static final BlockchainProcessor blockchainProcessor = Nxt.getBlockchainProcessor();
 
-    /** Bitcoin send suspended */
-    private static volatile boolean sendSuspended = false;
-
     /**
      * Initialize the token listener
      */
@@ -91,31 +88,6 @@ public class TokenListener implements Runnable {
     }
 
     /**
-     * Check if bitcoin send is suspended
-     *
-     * @return                  TRUE if send is suspended
-     */
-    static boolean isSuspended() {
-        return sendSuspended;
-    }
-
-    /**
-     * Suspend bitcoin send
-     */
-    static void suspendSend() {
-        sendSuspended = true;
-        Logger.logInfoMessage("Bitcoin send suspended");
-    }
-
-    /**
-     * Resume bitcoin send
-     */
-    static void resumeSend() {
-        sendSuspended = false;
-        Logger.logInfoMessage("Bitcoin send resumed");
-    }
-
-    /**
      * Process new blocks
      */
     @Override
@@ -151,7 +123,7 @@ public class TokenListener implements Runnable {
                             }
                         }
                         if (transfer == null || transfer.getCurrencyId() != TokenAddon.currencyId ||
-                                tx.getRecipientId() != TokenAddon.redemptionAccount) {
+                                tx.getRecipientId() != TokenAddon.accountId) {
                             continue;
                         }
                         if (TokenDb.tokenExists(tx.getId())) {
@@ -181,14 +153,14 @@ public class TokenListener implements Runnable {
                 // if we are unable to communicate with the bitcoind server.  We also won't send
                 // bitcoins while scanning the block chain.
                 //
-                if (!sendSuspended && !blockchainProcessor.isScanning()) {
+                if (!TokenAddon.isSuspended() && !blockchainProcessor.isScanning()) {
                     blockchain.readLock();
                     try {
                         List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
                         for (TokenTransaction token : tokenList) {
                             if (!BitcoinProcessor.sendBitcoins(token)) {
                                 Logger.logErrorMessage("Unable to send bitcoins; send suspended");
-                                sendSuspended = true;
+                                TokenAddon.suspend();
                                 break;
                             }
                         }

@@ -41,20 +41,29 @@ import javax.servlet.http.HttpServletRequest;
  * 'id' parameter specifies the block identifier.
  * <li>deleteToken - Delete a token from the database.  The 'id' parameter specifies the
  * token to be deleted.
+ * <li>getAccounts - Returns a list of Bitcoin addresses associated with Nxt accounts.
+ * The 'account' parameter returns the address associated with that account.  The
+ * 'address' parameter returns the accounts associated with that address.  All accounts
+ * are returned if neither parameter is specified.
  * <li>getAddress - Get a new Bitcoin address and associate it with a Nxt account.
  * The 'account' parameter identifies the Nxt account.  The 'publicKey' parameter
  * can be specified to further identify the Nxt account and should be specified for
  * a new Nxt account.
  * <li>getStatus - Returns the current status of the TokenExchange add-on.
- * <li>getTokens - Returns a transaction token list.  The 'height' parameter
+ * <li>getTokens - Returns a list of NXT currency transactions.  The 'height' parameter
  * can be used to specify the starting height, otherwise a height of 0 is used.
  * Transaction tokens at a height greater than the specified height
- * will be returned.  The 'includeExchanged' parameter can be used to return exchanged
- * tokens in addition to unexchanged tokens.
- * <li>resumeSend - Resume sending bitcoins for redeemed tokens and issuing tokens for received
- * bitcoins.
- * <li>suspendSend - Stop sending bitcoins for redeemed tokens and issuing tokens for received
- * bitcoins.
+ * will be returned.  The 'includeExchanged' parameter can be used to return processed
+ * tokens in addition to pending tokens.
+ * <li>getTransactions - Return a list of transactions received by the Bitcoin wallet for
+ * addresses associated with NXT accounts.  Specify the 'address' parameter to limit the
+ * list to transactions for that address.  Otherwise, all transactions are returned.  Specify
+ * the 'includeExchanged' parameter to return transactions that have been processed as well
+ * as pending transactions.
+ * <li>resume - Resume sending Bitcoins for redeemed tokens and issuing tokens for received
+ * Bitcoins.
+ * <li>suspend - Stop sending Bitcoins for redeemed tokens and issuing tokens for received
+ * Bitcoins.
  * <li>transactionReceived -Notification that a new bitcoin transaction has been received.  The
  * 'id' parameter specifies the transaction identifier.
  * </ul>
@@ -71,7 +80,8 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
      * Create the API request handler
      */
     public TokenAPI() {
-        super(new APITag[] {APITag.ADDONS}, "function", "id", "includeExchanged", "height", "account", "publicKey");
+        super(new APITag[] {APITag.ADDONS},
+                "function", "id", "includeExchanged", "height", "account", "publicKey", "address");
     }
 
     /**
@@ -89,22 +99,30 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         if (function == null) {
             return missing("function");
         }
+        String heightString;
+        String idString;
+        String includeExchangedString;
+        String accountString;
+        String publicKeyString;
+        String addressString;
+        boolean includeExchanged;
+        BitcoinAccount account;
+        long accountId;
         switch (function) {
             case "getStatus":
                 response.put("exchangeRate", TokenAddon.exchangeRate.toPlainString());
                 response.put("currencyCode", TokenAddon.currencyCode);
                 response.put("currencyId", Long.toUnsignedString(TokenAddon.currencyId));
-                response.put("redemptionAccount", Long.toUnsignedString(TokenAddon.redemptionAccount));
-                response.put("redemptionAccountRS", Convert.rsAccount(TokenAddon.redemptionAccount));
+                response.put("tokenAccount", Long.toUnsignedString(TokenAddon.accountId));
+                response.put("tokenAccountRS", Convert.rsAccount(TokenAddon.accountId));
                 response.put("confirmations", TokenAddon.confirmations);
                 response.put("bitcoindAddress", TokenAddon.bitcoindAddress);
                 response.put("bitcoindTxFee", TokenAddon.bitcoindTxFee.toPlainString());
-                response.put("suspended", TokenListener.isSuspended());
+                response.put("suspended", TokenAddon.isSuspended());
                 break;
             case "getTokens":
                 int height;
-                boolean includeExchanged;
-                String heightString = Convert.emptyToNull(req.getParameter("height"));
+                heightString = Convert.emptyToNull(req.getParameter("height"));
                 if (heightString == null) {
                     height = 0;
                 } else {
@@ -114,7 +132,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         return incorrect("height", exc.getMessage());
                     }
                 }
-                String includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
+                includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
                 if (includeExchangedString == null) {
                     includeExchanged = false;
                 } else {
@@ -133,7 +151,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                             BigDecimal.valueOf(token.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
                     tokenObject.put("bitcoinAmount",
                             BigDecimal.valueOf(token.getBitcoinAmount(), 8).toPlainString());
-                    tokenObject.put("bitcoinAddress", token.getBitcoinAddress());
+                    tokenObject.put("address", token.getBitcoinAddress());
                     if (token.getBitcoinTxId() != null) {
                         tokenObject.put("bitcoinTxId", Convert.toHexString(token.getBitcoinTxId()));
                     }
@@ -142,7 +160,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("tokens", tokenArray);
                 break;
             case "deleteToken":
-                String idString = Convert.emptyToNull(req.getParameter("id"));
+                idString = Convert.emptyToNull(req.getParameter("id"));
                 if (idString == null) {
                     return missing("id");
                 }
@@ -150,21 +168,21 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 boolean deleted = TokenDb.deleteToken(id);
                 response.put("deleted", deleted);
                 break;
-            case "suspendSend":
-                TokenListener.suspendSend();
-                response.put("suspended", TokenListener.isSuspended());
+            case "suspend":
+                TokenAddon.suspend();
+                response.put("suspended", TokenAddon.isSuspended());
                 break;
-            case "resumeSend":
-                TokenListener.resumeSend();
-                response.put("suspended", TokenListener.isSuspended());
+            case "resume":
+                TokenAddon.resume();
+                response.put("suspended", TokenAddon.isSuspended());
                 break;
             case "getAddress":
-                String accountString = Convert.emptyToNull(req.getParameter("account"));
+                accountString = Convert.emptyToNull(req.getParameter("account"));
                 if (accountString == null) {
                     return missing("account");
                 }
-                long accountId = Convert.parseAccountId(accountString);
-                String publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
+                accountId = Convert.parseAccountId(accountString);
+                publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
                 byte[] publicKey;
                 if (publicKeyString != null) {
                     publicKey = Convert.parseHexString(publicKeyString);
@@ -174,7 +192,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 } else {
                     publicKey = null;
                 }
-                BitcoinAccount account = TokenDb.getAccount(accountId);
+                account = TokenDb.getAccount(accountId);
                 if (account == null) {
                     String address = BitcoinProcessor.getNewAddress(Convert.rsAccount(accountId));
                     if (address == null) {
@@ -185,13 +203,59 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         return failure("Unable to create Bitcoin account");
                     }
                 }
-                response.put("address", account.getBitcoinAddress());
-                response.put("account", Long.toUnsignedString(accountId));
-                response.put("accountRS", Convert.rsAccount(accountId));
+                formatAccount(account, response);
+                break;
+            case "getAccounts":
+                JSONArray accountArray = new JSONArray();
+                accountString = Convert.emptyToNull(req.getParameter("account"));
+                addressString = Convert.emptyToNull(req.getParameter("address"));
+                if (accountString != null) {
+                    accountId = Convert.parseAccountId(accountString);
+                    account = TokenDb.getAccount(accountId);
+                    if (account != null) {
+                        accountArray.add(formatAccount(account, new JSONObject()));
+                    }
+                }
+                if (addressString != null) {
+                    account = TokenDb.getAccount(addressString);
+                    if (account != null) {
+                        accountArray.add(formatAccount(account, new JSONObject()));
+                    }
+                }
+                if (accountString == null && addressString == null) {
+                    List<BitcoinAccount> accountList = TokenDb.getAccounts();
+                    accountList.forEach((a) -> accountArray.add(formatAccount(a, new JSONObject())));
+                }
+                response.put("accounts", accountArray);
+                break;
+            case "getTransactions":
+                JSONArray txArray = new JSONArray();
+                addressString = Convert.emptyToNull(req.getParameter("address"));
+                includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
+                if (includeExchangedString == null) {
+                    includeExchanged = false;
+                } else {
+                    includeExchanged = Boolean.valueOf(includeExchangedString);
+                }
+                List<BitcoinTransaction> txList = TokenDb.getTransactions(addressString, includeExchanged);
+                txList.forEach((tx) -> {
+                    JSONObject txJSON = new JSONObject();
+                    txJSON.put("bitcoinTxId", Convert.toHexString(tx.getBitcoinTxId()));
+                    txJSON.put("address", tx.getBitcoinAddress());
+                    txJSON.put("bitcoinAmount", BigDecimal.valueOf(tx.getBitcoinAmount(), 8).toPlainString());
+                    txJSON.put("tokenAmount", BigDecimal.valueOf(tx.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
+                    txJSON.put("account", Long.toUnsignedString(tx.getAccountId()));
+                    txJSON.put("accountRS", Convert.rsAccount(tx.getAccountId()));
+                    txJSON.put("exchanged", tx.isExchanged());
+                    if (tx.getNxtTxId() != 0) {
+                        txJSON.put("nxtTxId", Long.toUnsignedString(tx.getNxtTxId()));
+                    }
+                    txArray.add(txJSON);
+                });
+                response.put("transactions", txArray);
                 break;
             case "blockReceived":
                 idString = Convert.emptyToNull(req.getParameter("id"));
-                nxt.util.Logger.logDebugMessage("Block " + idString + " received");
                 synchronized(bitcoinLock) {
                     if (!processingTransactions) {
                         processingTransactions = true;
@@ -203,7 +267,6 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 break;
             case "transactionReceived":
                 idString = Convert.emptyToNull(req.getParameter("id"));
-                nxt.util.Logger.logDebugMessage("Transaction " + idString + " received");
                 byte[] txid = Convert.parseHexString(idString);
                 synchronized(bitcoinLock) {
                     if (TokenDb.getTransaction(txid) == null) {
@@ -215,10 +278,8 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                                 Logger.logErrorMessage("Bitcoin transaction " + idString + " was not processed");
                             }
                         } else {
-                            Logger.logDebugMessage("Bitcoin transaction " + idString + " does have a Nxt account");
+                            Logger.logWarningMessage("Bitcoin transaction " + idString + " does have a Nxt account");
                         }
-                    } else {
-                        Logger.logDebugMessage("Bitcoin transaction " + idString + " is already in the database");
                     }
                 }
                 response.put("processed", true);
@@ -226,6 +287,21 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
             default:
                 return unknown(function);
         }
+        return response;
+    }
+
+    /**
+     * Format a Bitcoin account
+     *
+     * @param   account         Bitcoin account
+     * @param   response        Response object
+     * @return                  Response object
+     */
+    @SuppressWarnings("unchecked")
+    private static JSONObject formatAccount(BitcoinAccount account, JSONObject response) {
+        response.put("address", account.getBitcoinAddress());
+        response.put("account", Long.toUnsignedString(account.getAccountId()));
+        response.put("accountRS", Convert.rsAccount(account.getAccountId()));
         return response;
     }
 
