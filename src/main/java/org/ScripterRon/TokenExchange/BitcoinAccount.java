@@ -24,7 +24,7 @@ import java.sql.SQLException;
 class BitcoinAccount {
 
     /** Bitcoin address */
-    private final String address;
+    private final String bitcoinAddress;
 
     /** Nxt account identifier */
     private final long accountId;
@@ -40,7 +40,7 @@ class BitcoinAccount {
      * @param   publicKey       Nxt account public key (may be null)
      */
     BitcoinAccount(String address, long accountId, byte[] publicKey) {
-        this.address = address;
+        this.bitcoinAddress = address;
         this.accountId = accountId;
         this.publicKey = publicKey;
     }
@@ -52,24 +52,24 @@ class BitcoinAccount {
      * @throws  SQLException    SQL error occurred
      */
     BitcoinAccount(ResultSet rs) throws SQLException {
-        this.address = rs.getString("address");
+        this.bitcoinAddress = rs.getString("bitcoin_address");
         this.accountId = rs.getLong("account_id");
         this.publicKey = rs.getBytes("public_key");
     }
 
     /**
-     * Get the account address
+     * Get the Bitcoin address
      *
      * @return                  Bitcoin address
      */
-    String getAddress() {
-        return address;
+    String getBitcoinAddress() {
+        return bitcoinAddress;
     }
 
     /**
-     * Get the account identifier
+     * Get the Nxt account identifier
      *
-     * @return                  Nxt account identifier
+     * @return                  Account identifier
      */
     long getAccountId() {
         return accountId;

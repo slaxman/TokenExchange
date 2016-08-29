@@ -26,14 +26,20 @@ class BitcoinTransaction {
     /** Bitcoin transaction identifier */
     private final byte[] bitcoinTxId;
 
+    /** Bitcoin address */
+    private final String bitcoinAddress;
+
+    /** Number of confirmations */
+    private int confirmations;
+
     /** Bitcoin transaction amount */
-    private final long amount;
+    private final long bitcoinAmount;
+
+    /** Nxt currency amount */
+    private final long tokenAmount;
 
     /** Nxt account identifier */
     private final long accountId;
-
-    /** Nxt account public key */
-    private final byte[] publicKey;
 
     /** Token issued */
     private boolean exchanged;
@@ -42,38 +48,43 @@ class BitcoinTransaction {
     private long nxtTxId;
 
     /**
-     * Create a bitcoin transaction
+     * Create a Bitcoin transaction
      *
      * @param   bitcoinTxId     Bitcoin transaction identifier
-     * @param   amount          Bitcoin transaction amount
+     * @param   bitcoinAddress  Bitcoin address
      * @param   accountId       Nxt account identifier
-     * @param   publicKey       Nxt account public key (may be null)
+     * @param   bitcoinAmount   Bitcoin transaction amount
+     * @param   tokenAmount     Token units
+     * @param   confirmation    Number of confirmations
      */
-    BitcoinTransaction(byte[] bitcoinTxId, long amount, long accountId, byte[] publicKey) {
+    BitcoinTransaction(byte[] bitcoinTxId, String bitcoinAddress, long accountId,
+                                long bitcoinAmount, long tokenAmount, int confirmations) {
         this.bitcoinTxId = bitcoinTxId;
-        this.amount = amount;
+        this.bitcoinAddress = bitcoinAddress;
         this.accountId = accountId;
-        this.publicKey = publicKey;
-        this.exchanged = false;
+        this.bitcoinAmount = bitcoinAmount;
+        this.tokenAmount = tokenAmount;
+        this.confirmations = confirmations;
     }
 
     /**
-     * Create a bitcoin transaction
+     * Create a Bitcoin transaction
      *
      * @param   rs              Result set
      * @throws  SQLException    SQL error occurred
      */
     BitcoinTransaction(ResultSet rs) throws SQLException {
         this.bitcoinTxId = rs.getBytes("bitcoin_txid");
-        this.amount = rs.getLong("amount");
+        this.bitcoinAddress = rs.getString("address");
+        this.bitcoinAmount = rs.getLong("bitcoin_amount");
+        this.tokenAmount = rs.getLong("token_amount");
         this.accountId = rs.getLong("account_id");
-        this.publicKey = rs.getBytes("public_key");
         this.exchanged = rs.getBoolean("exchanged");
         this.nxtTxId = rs.getLong("nxt_txid");
     }
 
     /**
-     * Get the bitcoin transaction identifier
+     * Get the Bitcoin transaction identifier
      *
      * @return                  Transaction identifier
      */
@@ -82,12 +93,39 @@ class BitcoinTransaction {
     }
 
     /**
-     * Get the transaction amount
+     * Get the Bitcoin address
      *
-     * @return                  Transaction amount
+     * @return                  Bitcoin address
      */
-    long getAmount() {
-        return amount;
+    String getBitcoinAddress() {
+        return bitcoinAddress;
+    }
+
+    /**
+     * Get the number of confirmations
+     *
+     * @return                  Number of confirmations
+     */
+    int getConfirmations() {
+        return confirmations;
+    }
+
+    /**
+     * Get the Bitcoin amount
+     *
+     * @return                  Bitcoin amount
+     */
+    long getBitcoinAmount() {
+        return bitcoinAmount;
+    }
+
+    /**
+     * Get the token amount
+     *
+     * @return                  Token amount
+     */
+    long getTokenAmount() {
+        return tokenAmount;
     }
 
     /**
@@ -100,15 +138,7 @@ class BitcoinTransaction {
     }
 
     /**
-     * Get the account public key
-     *
-     * @return                  Account public key or null
-     */
-    byte[] getPublicKey() {
-        return publicKey;
-    }
-    /**
-     * Check if the transaction has been process
+     * Check if the transaction has been processed
      *
      * @return                  TRUE if the transaction has been processed
      */

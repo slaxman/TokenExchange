@@ -186,7 +186,7 @@ public class TokenListener implements Runnable {
                     try {
                         List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
                         for (TokenTransaction token : tokenList) {
-                            if (!TokenSend.sendBitcoins(token)) {
+                            if (!BitcoinProcessor.sendBitcoins(token)) {
                                 Logger.logErrorMessage("Unable to send bitcoins; send suspended");
                                 sendSuspended = true;
                                 break;

@@ -24,13 +24,13 @@ import java.sql.SQLException;
 class TokenTransaction {
 
     /** Transaction identifier */
-    private final long id;
+    private final long nxtTxId;
 
     /** Sender account id */
     private final long senderId;
 
     /** Bitcoin transaction id */
-    private String bitcoinTxId;
+    private byte[] bitcoinTxId;
 
     /** Block height */
     private final int height;
@@ -50,21 +50,22 @@ class TokenTransaction {
     /**
      * Create a token transaction
      *
-     * @param   id              Transaction identifier
+     * @param   nxtTxId         Transaction identifier
      * @param   senderId        Sender identifier
      * @param   height          Block height
      * @param   tokenAmount     Token amount
      * @param   bitcoinAmount   Bitcoin amount
      * @param   bitcoinAddress  Bitcoin address
      */
-    TokenTransaction(long id, long senderId, int height, long tokenAmount, long bitcoinAmount, String bitcoinAddress) {
-        this.id = id;
+    TokenTransaction(long nxtTxId, long senderId, int height, long tokenAmount, long bitcoinAmount, String bitcoinAddress) {
+        this.nxtTxId = nxtTxId;
         this.senderId = senderId;
         this.height = height;
         this.tokenAmount = tokenAmount;
         this.bitcoinAmount = bitcoinAmount;
         this.bitcoinAddress = bitcoinAddress;
         this.exchanged = false;
+        this.bitcoinTxId = null;
     }
 
     /**
@@ -74,7 +75,7 @@ class TokenTransaction {
      * @throws  SQLException    SQL error
      */
     TokenTransaction(ResultSet rs) throws SQLException {
-        this.id = rs.getLong("id");
+        this.nxtTxId = rs.getLong("nxt_txid");
         this.senderId = rs.getLong("sender");
         this.height = rs.getInt("height");
         this.tokenAmount = rs.getLong("token_amount");
@@ -82,19 +83,20 @@ class TokenTransaction {
         this.bitcoinAddress = rs.getString("bitcoin_address");
         if (rs.getBoolean("exchanged")) {
             this.exchanged = true;
-            this.bitcoinTxId = rs.getString("bitcoin_id");
+            this.bitcoinTxId = rs.getBytes("bitcoin_txid");
         } else {
             this.exchanged = false;
+            this.bitcoinTxId = null;
         }
     }
 
     /**
-     * Return the transaction identifier
+     * Return the Nxt transaction identifier
      *
      * @return                  Transaction identifier
      */
-    long getId() {
-        return id;
+    long getNxtTxId() {
+        return nxtTxId;
     }
 
     /**
@@ -125,7 +127,7 @@ class TokenTransaction {
     }
 
     /**
-     * Return the bitcoin amount
+     * Return the Bitcoin amount
      *
      * @return                  Bitcoin amount
      */
@@ -134,7 +136,7 @@ class TokenTransaction {
     }
 
     /**
-     * Return the bitcoin address
+     * Return the Bitcoin address
      *
      * @return                  Bitcoin address
      */
@@ -152,13 +154,13 @@ class TokenTransaction {
     }
 
     /**
-     * Set bitcoin exchanged
+     * Set Bitcoin exchanged
      *
      * @param   bitcoinTxId     Bitcoin transaction identifier
      */
-    void setExchanged(String bitcoinTxId) {
+    void setExchanged(byte[] bitcoinTxId) {
         this.bitcoinTxId = bitcoinTxId;
-        exchanged = true;
+        this.exchanged = true;
     }
 
     /**
@@ -166,7 +168,7 @@ class TokenTransaction {
      *
      * @return                  Bitcoin transaction identifier
      */
-    String getBitcoinTxId() {
+    byte[] getBitcoinTxId() {
         return bitcoinTxId;
     }
 }

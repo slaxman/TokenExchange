@@ -15,6 +15,7 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.util.Convert;
 import nxt.util.Logger;
 
 import org.json.simple.JSONObject;
@@ -30,11 +31,12 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.List;
 
 /**
- * Send bitcoins
+ * Interface between NRS and the Bitcoin server
  */
-public class TokenSend {
+public class BitcoinProcessor {
 
     /** Connect timeout (milliseconds) */
     private static final int nodeConnectTimeout = 5000;
@@ -60,7 +62,7 @@ public class TokenSend {
     private static final BigDecimal sendTxSize = BigDecimal.valueOf(0.226);
 
     /**
-     * Send bitcoins
+     * Send Bitcoins
      *
      * @param   token           Transaction token
      * @return                  TRUE if the coins were sent
@@ -75,17 +77,7 @@ public class TokenSend {
             BigDecimal bitcoinAmount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
             BigDecimal bitcoinFee = TokenAddon.bitcoindTxFee.multiply(sendTxSize);
             response = issueRequest("getbalance", "[]");
-            Object resultObject = response.get("result");
-            BigDecimal bitcoinBalance;
-            if (resultObject instanceof Double) {
-                bitcoinBalance = BigDecimal.valueOf((Double)resultObject);
-            } else if (resultObject instanceof Long) {
-                bitcoinBalance = BigDecimal.valueOf((Long)resultObject);
-            } else if (resultObject instanceof String) {
-                bitcoinBalance = new BigDecimal((String)resultObject);
-            } else {
-                throw new IOException("Unrecognized result returned for 'getbalance'");
-            }
+            BigDecimal bitcoinBalance = getNumber(response.get("result"));
             if (bitcoinAmount.add(bitcoinFee).compareTo(bitcoinBalance) > 0) {
                 throw new IOException("Unable to send " + bitcoinAmount.toPlainString() +
                         " BTC: Insufficient funds in wallet");
@@ -111,7 +103,7 @@ public class TokenSend {
             //
             // Mark the token as exchanged
             //
-            token.setExchanged(bitcoindTxId);
+            token.setExchanged(Convert.parseHexString(bitcoindTxId));
             TokenDb.updateToken(token);
             Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress());
             result = true;
@@ -121,6 +113,8 @@ public class TokenSend {
             if (TokenAddon.bitcoindWalletPassphrase != null) {
                 issueRequest("walletlock", "[]");
             }
+        } catch (NumberFormatException exc) {
+            Logger.logErrorMessage("Invalid numeric data returned by server", exc);
         } catch (IOException exc) {
             Logger.logErrorMessage("Unable to send bitcoins", exc);
         }
@@ -128,13 +122,107 @@ public class TokenSend {
     }
 
     /**
+     * Get a confirmed transaction
+     *
+     * @param   txid            Bitcoin transaction identifier
+     * @return                  Bitcoin transaction or null if not found or not confirmed
+     */
+    @SuppressWarnings("unchecked")
+    static BitcoinTransaction getTransaction(byte[] txid) {
+        BitcoinTransaction tx = null;
+        try{
+            String params = String.format("[\"%s\",false]", Convert.toHexString(txid));
+            JSONObject response = issueRequest("gettransaction", params);
+            response = (JSONObject)response.get("result");
+            int confirmations = ((Long)response.get("confirmations")).intValue();
+            if (confirmations > 0) {
+                List<JSONObject> detailList = (List<JSONObject>)response.get("details");
+                for (JSONObject detail : detailList) {
+                    if (((String)detail.get("category")).equals("receive")) {
+                        String address = (String)detail.get("address");
+                        BitcoinAccount account = TokenDb.getAccount(address);
+                        if (account != null) {
+                            BigDecimal bitcoinAmount = getNumber(detail.get("amount"));
+                            BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
+                            tx = new BitcoinTransaction(txid, address, account.getAccountId(),
+                                    bitcoinAmount.movePointRight(8).longValue(),
+                                    tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue(),
+                                    confirmations);
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (IOException exc) {
+            Logger.logErrorMessage("Unable to get transaction", exc);
+        }
+        return tx;
+    }
+
+    /**
+     * Get a new Bitcoin address
+     *
+     * @param   label           Address label
+     * @return                  Bitcoin address or null if an error occurred
+     */
+    static String getNewAddress(String label) {
+        String address = null;
+        String params;
+        try {
+            //
+            // Unlock the wallet - it will lock automatically in 15
+            //
+            if (TokenAddon.bitcoindWalletPassphrase != null) {
+                params = String.format("[\"%s\",15]", TokenAddon.bitcoindWalletPassphrase);
+                issueRequest("walletpassphrase", params);
+            }
+            //
+            // Get a new address
+            //
+            params = String.format("[\"%s\"]", label);
+            JSONObject response = issueRequest("getnewaddress", params);
+            address = (String)response.get("result");
+            //
+            // Lock the wallet once more
+            //
+            if (TokenAddon.bitcoindWalletPassphrase != null) {
+                issueRequest("walletlock", "[]");
+            }
+        } catch (IOException exc) {
+            Logger.logErrorMessage("Unable to get new Bitcoin address", exc);
+        }
+        return address;
+    }
+
+    /**
+     * Get a numeric value based on the object type
+     *
+     * @param   obj             Parsed object
+     * @return                  Numeric value
+     * @throws  IOException     Invalid numeric object
+     */
+    private static BigDecimal getNumber(Object obj) throws IOException {
+        BigDecimal result;
+        if (obj instanceof Double) {
+            result = BigDecimal.valueOf((Double)obj);
+        } else if (obj instanceof Long) {
+            result = BigDecimal.valueOf((Long)obj);
+        } else if (obj instanceof String) {
+            result = new BigDecimal((String)obj);
+        } else {
+            throw new IOException("Unrecognized numeric result type");
+        }
+        return result;
+    }
+
+    /**
      * Issue the Bitcoin RPC request and return the parsed JSON response
      *
-     * @param       requestType             Request type
-     * @param       requestParams           Request parameters in JSON format
-     * @return                              Parsed JSON response
-     * @throws      IOException             Unable to issue Bitcoin RPC request
-     * @throws      ParseException          Unable to parse the Bitcoin RPC response
+     * @param   requestType     Request type
+     * @param   requestParams   Request parameters in JSON format
+     * @return                  Parsed JSON response
+     * @throws  IOException     Unable to issue Bitcoin RPC request
+     * @throws  ParseException  Unable to parse the Bitcoin RPC response
      */
     private static JSONObject issueRequest(String requestType, String requestParams) throws IOException {
         long id = requestId.incrementAndGet();

@@ -20,6 +20,7 @@ import nxt.http.APITag;
 import nxt.http.ParameterException;
 import nxt.util.Convert;
 import nxt.util.JSON;
+import nxt.util.Logger;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -36,11 +37,11 @@ import javax.servlet.http.HttpServletRequest;
  *
  * <p>The following functions are provided:
  * <ul>
- * <li>blockReceived - Notification that a new bitcoin block has been received.  The
+ * <li>blockReceived - Notification that a new Bitcoin block has been received.  The
  * 'id' parameter specifies the block identifier.
  * <li>deleteToken - Delete a token from the database.  The 'id' parameter specifies the
  * token to be deleted.
- * <li>getAddress - Get a new bitcoin address and associate it with a Nxt account.
+ * <li>getAddress - Get a new Bitcoin address and associate it with a Nxt account.
  * The 'account' parameter identifies the Nxt account.  The 'publicKey' parameter
  * can be specified to further identify the Nxt account and should be specified for
  * a new Nxt account.
@@ -59,6 +60,12 @@ import javax.servlet.http.HttpServletRequest;
  * </ul>
  */
 public class TokenAPI extends APIServlet.APIRequestHandler {
+
+    /** Bitcoin processing lock */
+    private static final Object bitcoinLock = new Object();
+
+    /** Processing bitcoin transactions */
+    private static volatile boolean processingTransactions = false;
 
     /**
      * Create the API request handler
@@ -79,11 +86,6 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
     protected JSONStreamAware processRequest(HttpServletRequest req) throws ParameterException {
         JSONObject response = new JSONObject();
         String function = Convert.emptyToNull(req.getParameter("function"));
-        String idString = Convert.emptyToNull(req.getParameter("id"));
-        String accountString = Convert.emptyToNull(req.getParameter("account"));
-        String publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
-        String includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
-        String heightString = Convert.emptyToNull(req.getParameter("height"));
         if (function == null) {
             return missing("function");
         }
@@ -99,10 +101,10 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("bitcoindTxFee", TokenAddon.bitcoindTxFee.toPlainString());
                 response.put("suspended", TokenListener.isSuspended());
                 break;
-
             case "getTokens":
                 int height;
                 boolean includeExchanged;
+                String heightString = Convert.emptyToNull(req.getParameter("height"));
                 if (heightString == null) {
                     height = 0;
                 } else {
@@ -112,6 +114,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         return incorrect("height", exc.getMessage());
                     }
                 }
+                String includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
                 if (includeExchangedString == null) {
                     includeExchanged = false;
                 } else {
@@ -121,7 +124,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 JSONArray tokenArray = new JSONArray();
                 tokenList.forEach((token) -> {
                     JSONObject tokenObject = new JSONObject();
-                    tokenObject.put("id", Long.toUnsignedString(token.getId()));
+                    tokenObject.put("id", Long.toUnsignedString(token.getNxtTxId()));
                     tokenObject.put("sender", Long.toUnsignedString(token.getSenderId()));
                     tokenObject.put("senderRS", Convert.rsAccount(token.getSenderId()));
                     tokenObject.put("height", token.getHeight());
@@ -132,13 +135,14 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                             BigDecimal.valueOf(token.getBitcoinAmount(), 8).toPlainString());
                     tokenObject.put("bitcoinAddress", token.getBitcoinAddress());
                     if (token.getBitcoinTxId() != null) {
-                        tokenObject.put("bitcoinTxId", token.getBitcoinTxId());
+                        tokenObject.put("bitcoinTxId", Convert.toHexString(token.getBitcoinTxId()));
                     }
                     tokenArray.add(tokenObject);
                 });
                 response.put("tokens", tokenArray);
                 break;
             case "deleteToken":
+                String idString = Convert.emptyToNull(req.getParameter("id"));
                 if (idString == null) {
                     return missing("id");
                 }
@@ -155,20 +159,88 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("suspended", TokenListener.isSuspended());
                 break;
             case "getAddress":
-                response.put("address", "not-a-valid-address");
+                String accountString = Convert.emptyToNull(req.getParameter("account"));
+                if (accountString == null) {
+                    return missing("account");
+                }
+                long accountId = Convert.parseAccountId(accountString);
+                String publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
+                byte[] publicKey;
+                if (publicKeyString != null) {
+                    publicKey = Convert.parseHexString(publicKeyString);
+                    if (publicKey.length != 32) {
+                        return incorrect("publicKey", "public key is not 32 bytes");
+                    }
+                } else {
+                    publicKey = null;
+                }
+                BitcoinAccount account = TokenDb.getAccount(accountId);
+                if (account == null) {
+                    String address = BitcoinProcessor.getNewAddress(Convert.rsAccount(accountId));
+                    if (address == null) {
+                        return failure("Unable to get new Bitcoin address from server");
+                    }
+                    account = new BitcoinAccount(address, accountId, publicKey);
+                    if (!TokenDb.storeAccount(account)) {
+                        return failure("Unable to create Bitcoin account");
+                    }
+                }
+                response.put("address", account.getBitcoinAddress());
+                response.put("account", Long.toUnsignedString(accountId));
+                response.put("accountRS", Convert.rsAccount(accountId));
                 break;
             case "blockReceived":
+                idString = Convert.emptyToNull(req.getParameter("id"));
                 nxt.util.Logger.logDebugMessage("Block " + idString + " received");
+                synchronized(bitcoinLock) {
+                    if (!processingTransactions) {
+                        processingTransactions = true;
+                        TokenCurrency.processTransactions();
+                        processingTransactions = false;
+                    }
+                }
                 response.put("processed", true);
                 break;
             case "transactionReceived":
+                idString = Convert.emptyToNull(req.getParameter("id"));
                 nxt.util.Logger.logDebugMessage("Transaction " + idString + " received");
+                byte[] txid = Convert.parseHexString(idString);
+                synchronized(bitcoinLock) {
+                    if (TokenDb.getTransaction(txid) == null) {
+                        BitcoinTransaction tx = BitcoinProcessor.getTransaction(txid);
+                        if (tx != null) {
+                            if (TokenDb.storeTransaction(tx)) {
+                                Logger.logInfoMessage("Bitcoin transaction " + idString + " added to database");
+                            } else {
+                                Logger.logErrorMessage("Bitcoin transaction " + idString + " was not processed");
+                            }
+                        } else {
+                            Logger.logDebugMessage("Bitcoin transaction " + idString + " does have a Nxt account");
+                        }
+                    } else {
+                        Logger.logDebugMessage("Bitcoin transaction " + idString + " is already in the database");
+                    }
+                }
                 response.put("processed", true);
                 break;
             default:
                 return unknown(function);
         }
         return response;
+    }
+
+    /**
+     * Create response for a failure
+     *
+     * @param   message         Error message
+     * @return                  Response
+     */
+    @SuppressWarnings("unchecked")
+    private static JSONStreamAware failure(String message) {
+        JSONObject response = new JSONObject();
+        response.put("errorCode", 4);
+        response.put("errorDescription", message);
+        return JSON.prepare(response);
     }
 
     /**

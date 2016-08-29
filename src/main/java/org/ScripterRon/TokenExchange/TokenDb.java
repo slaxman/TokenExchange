@@ -39,40 +39,42 @@ public class TokenDb {
     /** Token table definitions */
     private static final String tokenTableDefinition = "CREATE TABLE IF NOT EXISTS token_exchange ("
             + "db_id IDENTITY,"
-            + "id BIGINT NOT NULL,"
-            + "sender BIGINT NOT NULL,"
-            + "height INT NOT NULL,"
-            + "exchanged BOOLEAN NOT NULL,"
-            + "token_amount BIGINT NOT NULL,"
-            + "bitcoin_amount BIGINT NOT NULL,"
-            + "bitcoin_address VARCHAR NOT NULL,"
-            + "bitcoin_id VARCHAR)";
+            + "nxt_txid BIGINT NOT NULL,"           // Nxt transaction identifier
+            + "sender BIGINT NOT NULL,"             // Nxt transaction sender identifier
+            + "height INT NOT NULL,"                // Nxt transaction height
+            + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency exchanged for Bitcoin
+            + "token_amount BIGINT NOT NULL,"       // Number of units redeemed
+            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
+            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
+            + "bitcoin_txid BINARY(32))";           // Bitcoin transaction identifier
     private static final String tokenIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_idx1 "
-            + "ON token_exchange(id)";
+            + "ON token_exchange(nxt_txid)";
     private static final String tokenIndexDefinition2 = "CREATE INDEX IF NOT EXISTS token_exchange_idx2 "
             + "ON token_exchange(exchanged)";
 
     /** Address table definitions */
     private static final String accountTableDefinition = "CREATE TABLE IF NOT EXISTS token_exchange_account ("
             + "db_id IDENTITY,"
-            + "address VARCHAR NOT NULL,"
-            + "account_id BIGINT NOT NULL,"
-            + "public_key BINARY(32))";
+            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
+            + "account_id BIGINT NOT NULL,"         // Nxt account identifier
+            + "public_key BINARY(32))";             // Nxt account public key
     private static final String accountIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_account_idx1 "
-            + "ON token_exchange_account(address)";
+            + "ON token_exchange_account(bitcoin_address)";
     private static final String accountIndexDefinition2 = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_account_idx2 "
             + "ON token_exchange_account(account_id)";
 
     /** Transaction table definitions */
     private static final String transactionTableDefinition = "CREATE TABLE IF NOT EXISTS token_exchange_transaction ("
             + "db_id IDENTITY,"
-            + "bitcoin_txid BINARY(32) NOT NULL,"
-            + "account_id BIGINT NOT NULL,"
-            + "amount BIGINT NOT NULL,"
-            + "exchanged BOOLEAN NOT NULL,"
-            + "nxt_txid BIGINT NOT NULL)";
+            + "bitcoin_txid BINARY(32) NOT NULL,"   // Bitcoin transaction identifier
+            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
+            + "account_id BIGINT NOT NULL,"         // Nxt account identifier
+            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
+            + "token_amount BIGINT NOT NULL,"       // Number of units issued
+            + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency has been issued
+            + "nxt_txid BIGINT NOT NULL)";          // Nxt transaction identifier
     private static final String transactionIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_transaction_idx1 "
-            + "ON token_exchange_transaction(txid)";
+            + "ON token_exchange_transaction(bitcoin_txid)";
     private static final String transactionIndexDefinition2 = "CREATE INDEX IF NOT EXISTS token_exchange_transaction_idx2 "
             + "ON token_exchange_transaction(exchanged)";
 
@@ -171,7 +173,7 @@ public class TokenDb {
                     stmt.execute(tokenIndexDefinition1);
                     stmt.execute(tokenIndexDefinition2);
                     stmt.executeUpdate("INSERT INTO token_exchange "
-                        + "(id,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                        + "(nxt_txid,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
                         + "VALUES(0,0,0,false,1,0,'Database version')");
                 case 1:
                     stmt.execute(accountTableDefinition);
@@ -180,7 +182,7 @@ public class TokenDb {
                     stmt.execute(transactionTableDefinition);
                     stmt.execute(transactionIndexDefinition1);
                     stmt.execute(transactionIndexDefinition2);
-                    stmt.executeUpdate("UPDATE token_exchange SET token_amount=2 WHERE id=0");
+                    stmt.executeUpdate("UPDATE token_exchange SET token_amount=2 WHERE nxt_txid=0");
                 default:
                     Logger.logInfoMessage("Using Version " + dbVersion + " TokenExchange database");
             }
@@ -196,7 +198,7 @@ public class TokenDb {
     static boolean tokenExists(long id) {
         boolean exists = false;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM token_exchange WHERE id=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM token_exchange WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -213,12 +215,12 @@ public class TokenDb {
      * Get a token transaction
      *
      * @param   id              Transaction identifier
-     * @return                  Transaction token or null if an error occurred
+     * @return                  Transaction token or null if not found
      */
     static TokenTransaction getToken(long id) {
         TokenTransaction tx = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange WHERE id=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -289,9 +291,9 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange "
-                        + "(id,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                        + "(nxt_txid,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
                         + "VALUES(?,?,?,false,?,?,?)")) {
-            stmt.setLong(1, tx.getId());
+            stmt.setLong(1, tx.getNxtTxId());
             stmt.setLong(2, tx.getSenderId());
             stmt.setInt(3, tx.getHeight());
             stmt.setLong(4, tx.getTokenAmount());
@@ -314,9 +316,9 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE token_exchange "
-                        + "SET exchanged=true,bitcoin_id=? WHERE id=?")) {
-            stmt.setString(1, tx.getBitcoinTxId());
-            stmt.setLong(2, tx.getId());
+                        + "SET exchanged=true,bitcoin_txid=? WHERE nxt_txid=?")) {
+            stmt.setBytes(1, tx.getBitcoinTxId());
+            stmt.setLong(2, tx.getNxtTxId());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to update transaction in TokenExchange table", exc);
@@ -336,7 +338,7 @@ public class TokenDb {
         }
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("DELETE FROM token_exchange WHERE id=?")) {
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM token_exchange WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
@@ -355,9 +357,9 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange_account "
-                        + "(address,account_id,public_key) "
+                        + "(bitcoin_address,account_id,public_key) "
                         + "VALUES(?,?,?)")) {
-            stmt.setString(1, account.getAddress());
+            stmt.setString(1, account.getBitcoinAddress());
             stmt.setLong(2, account.getAccountId());
             if (account.getPublicKey() != null) {
                 stmt.setBytes(3, account.getPublicKey());
@@ -404,7 +406,7 @@ public class TokenDb {
         BitcoinAccount account = null;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange_account "
-                        + "WHERE address=?")) {
+                        + "WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -427,14 +429,35 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO token_exchange_transaction "
-                        + "(bitcoin_txid,amount,account_id,exchanged,nxt_txid) "
-                        + "VALUES(?,?,?,false,0)")) {
+                        + "(bitcoin_txid,bitcoin_address,bitcoin_amount,account_id,exchanged,nxt_txid) "
+                        + "VALUES(?,?,?,?,false,0)")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
-            stmt.setLong(2, tx.getAmount());
-            stmt.setLong(3, tx.getAccountId());
+            stmt.setString(2, tx.getBitcoinAddress());
+            stmt.setLong(3, tx.getBitcoinAmount());
+            stmt.setLong(4, tx.getAccountId());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store transaction in TokenExchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
+     * Update a Bitcoin transaction
+     *
+     * @param   tx              Bitcoin transaction
+     * @return                  TRUE if the transaction was updated
+     */
+    static boolean updateTransaction(BitcoinTransaction tx) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE token_exchange_transaction "
+                        + "SET exchanged=true,nxt_txid=? WHERE bitcoin_txid=?")) {
+            stmt.setLong(1, tx.getNxtTxId());
+            stmt.setBytes(2, tx.getBitcoinTxId());
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to update transaction in TokenExchange table", exc);
         }
         return count != 0;
     }
@@ -448,11 +471,8 @@ public class TokenDb {
     static BitcoinTransaction getTransaction(byte[] txid) {
         BitcoinTransaction tx = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT T.bitcoin_txid AS bitcoin_txid,"
-                        + "T.amount AS amount,T.exchanged AS exchanged,T.account_id AS account_id,"
-                        + "T.nxt_txid AS nxt_txid,A.public_key AS public_key "
-                        + "FROM token_exchange_transaction AS T JOIN token_exchange_address AS A "
-                        + "WHERE T.bitcoin_txid=? AND T.account_id=A.account_id")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange_transaction "
+                        + "WHERE bitcoin_txid=?")) {
             stmt.setBytes(1, txid);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -466,7 +486,7 @@ public class TokenDb {
     }
 
     /**
-     * Get a Bitcoin transactions
+     * Get the Bitcoin transactions
      *
      * @param   exchanged       Include processed transactions
      * @return                  Bitcoin transaction list
@@ -474,12 +494,8 @@ public class TokenDb {
     static List<BitcoinTransaction> getTransactions(boolean exchanged) {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT T.bitcoin_txid AS bitcoin_txid,"
-                        + "T.amount AS amount,T.exchanged AS exchanged,T.account_id AS account_id,"
-                        + "T.nxt_txid AS nxt_txid,A.public_key AS public_key "
-                        + "FROM token_exchange_transaction AS T JOIN token_exchange_address AS A "
-                        + "WHERE " + (exchanged ? "" : "T.exchanged=false AND ")
-                        + "T.account_id=A.account_id")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM token_exchange_transaction "
+                        + (exchanged ? "" : "WHERE exchanged=false ") + "ORDER BY db_id")) {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     txList.add(new BitcoinTransaction(rs));
