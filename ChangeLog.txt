@@ -1,5 +1,12 @@
 TokenExchange Change Log
 =========================
 
+Version 1.1.0
+  - TokenExchange no longer uses Bitcoin wallet notifications
+    - walletnotify.sh is no longer used
+    - TokenExchange transactionReceived API removed
+  - Handle Bitcoin block chain reorganizations
+  - Handle wallet transactions received while TokenExchange was not running
+  
 Version 1.0.0
   - Initial release

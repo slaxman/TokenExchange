@@ -29,8 +29,8 @@ class BitcoinTransaction {
     /** Bitcoin address */
     private final String bitcoinAddress;
 
-    /** Number of confirmations */
-    private int confirmations;
+    /** Bitcoin block height */
+    private final int height;
 
     /** Bitcoin transaction amount */
     private final long bitcoinAmount;
@@ -51,20 +51,20 @@ class BitcoinTransaction {
      * Create a Bitcoin transaction
      *
      * @param   bitcoinTxId     Bitcoin transaction identifier
+     * @param   height          Bitcoin block height
      * @param   bitcoinAddress  Bitcoin address
      * @param   accountId       Nxt account identifier
      * @param   bitcoinAmount   Bitcoin transaction amount
      * @param   tokenAmount     Token units
-     * @param   confirmation    Number of confirmations
      */
-    BitcoinTransaction(byte[] bitcoinTxId, String bitcoinAddress, long accountId,
-                                long bitcoinAmount, long tokenAmount, int confirmations) {
+    BitcoinTransaction(byte[] bitcoinTxId, int height, String bitcoinAddress, long accountId,
+                                long bitcoinAmount, long tokenAmount) {
         this.bitcoinTxId = bitcoinTxId;
+        this.height = height;
         this.bitcoinAddress = bitcoinAddress;
         this.accountId = accountId;
         this.bitcoinAmount = bitcoinAmount;
         this.tokenAmount = tokenAmount;
-        this.confirmations = confirmations;
     }
 
     /**
@@ -75,6 +75,7 @@ class BitcoinTransaction {
      */
     BitcoinTransaction(ResultSet rs) throws SQLException {
         this.bitcoinTxId = rs.getBytes("bitcoin_txid");
+        this.height = rs.getInt("height");
         this.bitcoinAddress = rs.getString("bitcoin_address");
         this.bitcoinAmount = rs.getLong("bitcoin_amount");
         this.tokenAmount = rs.getLong("token_amount");
@@ -102,12 +103,12 @@ class BitcoinTransaction {
     }
 
     /**
-     * Get the number of confirmations
+     * Get the Bitcoin block height
      *
-     * @return                  Number of confirmations
+     * @return                  Block height
      */
-    int getConfirmations() {
-        return confirmations;
+    int getHeight() {
+        return height;
     }
 
     /**

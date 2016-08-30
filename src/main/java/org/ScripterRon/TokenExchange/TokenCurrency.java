@@ -34,20 +34,17 @@ public class TokenCurrency {
      * Process Bitcoin transactions after a new Bitcoin block has been received
      */
     static void processTransactions() {
+        BitcoinProcessor.obtainLock();
         try {
             Account account = Account.getAccount(TokenAddon.accountId);
             long nxtBalance = account.getUnconfirmedBalanceNQT();
             Account.AccountCurrency currency = Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
             long unitBalance = currency.getUnconfirmedUnits();
             List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
+            int chainHeight = BitcoinProcessor.getChainHeight();
             for (BitcoinTransaction tx : txList) {
                 String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
-                BitcoinTransaction update = BitcoinProcessor.getTransaction(tx.getBitcoinTxId());
-                if (update == null) {
-                    Logger.logWarningMessage("Bitcoin wallet transaction " + bitcoinTxId + " was not found");
-                    continue;
-                }
-                if (update.getConfirmations() < TokenAddon.confirmations) {
+                if (chainHeight - tx.getHeight() < TokenAddon.confirmations) {
                     continue;
                 }
                 long units = tx.getTokenAmount();
@@ -60,7 +57,7 @@ public class TokenCurrency {
                 Attachment attachment = new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
                 Transaction.Builder builder = Nxt.newTransactionBuilder(TokenAddon.publicKey,
                         0, 0, (short)1440, attachment);
-                builder.recipientId(tx.getAccountId()).timestamp(Nxt.getBlockchain().getLastBlockTimestamp());
+                builder.recipientId(tx.getAccountId()).timestamp(Nxt.getEpochTime());
                 Transaction transaction = builder.build(TokenAddon.secretPhrase);
                 if (transaction.getFeeNQT() > nxtBalance) {
                     Logger.logErrorMessage("Insufficient NXT available to process Bitcoin transaction " +
@@ -80,6 +77,8 @@ public class TokenCurrency {
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to processing Bitcoin transactions, processing suspended", exc);
             TokenAddon.suspend();
+        } finally {
+            BitcoinProcessor.releaseLock();
         }
     }
 }

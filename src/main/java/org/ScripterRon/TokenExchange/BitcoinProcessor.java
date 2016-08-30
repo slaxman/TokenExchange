@@ -30,13 +30,15 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Base64;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.List;
 
 /**
  * Interface between NRS and the Bitcoin server
  */
-public class BitcoinProcessor {
+public class BitcoinProcessor implements Runnable {
 
     /** Minimum wallet version */
     private static final long MIN_VERSION = 130000L;
@@ -49,6 +51,21 @@ public class BitcoinProcessor {
 
     /** Request identifier */
     private static final AtomicLong requestId = new AtomicLong(0);
+
+    /** Processing thread */
+    private static Thread processingThread;
+
+    /** Processing lock */
+    private static final ReentrantLock processingLock = new ReentrantLock();
+
+    /** Processing queue */
+    private static final LinkedBlockingQueue<Boolean> processingQueue = new LinkedBlockingQueue<>();
+
+    /** Current block chain height */
+    private static int chainHeight = 0;
+
+    /** Current best block hash */
+    private static String bestBlockHash = "";
 
     /** Basic authentication */
     private static String encodedAuthentication;
@@ -67,18 +84,82 @@ public class BitcoinProcessor {
     /**
      * Initialize the Bitcoin processor
      *
-     * @throws  IllegalArgumentException    Bitcoin server version not supported
+     * @throws  IllegalArgumentException    Processing error occurred
      * @throws  IOException                 I/O error occurred
      */
     static void init() throws IllegalArgumentException, IOException {
-        JSONObject response = issueRequest("getwalletinfo", "[]");
+        //
+        // Validate the Bitcoin server
+        //
+        JSONObject response = issueRequest("getnetworkinfo", "[]");
         response = (JSONObject)response.get("result");
-        long version = (Long)response.get("walletversion");
-        BigDecimal balance = getNumber(response.get("balance"));
+        long version = (Long)response.get("version");
+        String subversion = (String)response.get("subversion");
         if (version < MIN_VERSION) {
-            throw new IllegalArgumentException("Bitcoin wallet version " + version + " is not supported");
+            throw new IllegalArgumentException("Bitcoin server version " + version + " is not supported");
         }
-        Logger.logInfoMessage("Bitcoin wallet version " + version + ", Balance " + balance.toPlainString() + " BTC");
+        //
+        // Get block chain height and best block hash
+        //
+        response = issueRequest("getblockcount", "[]");
+        int currentHeight = ((Long)response.get("result")).intValue();
+        chainHeight = TokenDb.getChainHeight();
+        if (chainHeight > 0) {
+            byte[] blockId = TokenDb.getChainBlock(chainHeight);
+            if (blockId != null) {
+                bestBlockHash = Convert.toHexString(blockId);
+            }
+        } else if (chainHeight < 0) {
+            throw new IllegalArgumentException("Unable to get Bitcoin chain height from TokenExchange database");
+        }
+        Logger.logInfoMessage("Bitcoin server: Version " + version + " (" + subversion + "), Chain height " + currentHeight);
+        //
+        // Get the current wallet balance
+        //
+        response = issueRequest("getbalance", "[]");
+        BigDecimal balance = getNumber(response.get("result"));
+        Logger.logInfoMessage("Bitcoin wallet: Balance " + balance.toPlainString() + " BTC");
+        //
+        // Start our processing thread
+        //
+        processingThread = new Thread(new BitcoinProcessor());
+        processingThread.start();
+    }
+
+    /**
+     * Shutdown the Bitcoin processor
+     */
+    static void shutdown() {
+        if (processingThread != null) {
+            try {
+                processingQueue.put(false);
+            } catch (InterruptedException exc) {
+                // Ignored since the queue is unbounded
+            }
+        }
+    }
+
+    /**
+     * Obtain the Bitcoin processor lock
+     */
+    static void obtainLock() {
+        processingLock.lock();
+    }
+
+    /**
+     * Release the Bitcoin processor lock
+     */
+    static void releaseLock() {
+        processingLock.unlock();
+    }
+
+    /**
+     * Get the current Bitcoin block chain height
+     *
+     * @return                  Block chain height
+     */
+    static int getChainHeight() {
+        return chainHeight;
     }
 
     /**
@@ -120,14 +201,18 @@ public class BitcoinProcessor {
             params = String.format("[\"%s\",%s]", token.getBitcoinAddress(), bitcoinAmount.toPlainString());
             response = issueRequest("sendtoaddress", params);
             String bitcoindTxId = (String)response.get("result");
+            Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress()
+                    + ", Transaction " + bitcoindTxId);
             //
             // Mark the token as exchanged
             //
             token.setExchanged(Convert.parseHexString(bitcoindTxId));
-            TokenDb.updateToken(token);
-            Logger.logInfoMessage("Sent " + bitcoinAmount.toPlainString() + " BTC to " + token.getBitcoinAddress()
-                    + ", Transaction " + bitcoindTxId);
-            result = true;
+            if (TokenDb.updateToken(token)) {
+                result = true;
+            } else {
+                Logger.logErrorMessage("BTC was sent but the TokenExchange database was not updated\n "
+                        + "  Repair database before restarting the TokenExchange");
+            }
             //
             // Lock the wallet once more
             //
@@ -140,42 +225,6 @@ public class BitcoinProcessor {
             Logger.logErrorMessage("Unable to send bitcoins", exc);
         }
         return result;
-    }
-
-    /**
-     * Get a wallet transaction
-     *
-     * @param   txid            Bitcoin transaction identifier
-     * @return                  Bitcoin transaction or null if not found
-     */
-    @SuppressWarnings("unchecked")
-    static BitcoinTransaction getTransaction(byte[] txid) {
-        BitcoinTransaction tx = null;
-        try{
-            String params = String.format("[\"%s\",false]", Convert.toHexString(txid));
-            JSONObject response = issueRequest("gettransaction", params);
-            response = (JSONObject)response.get("result");
-            int confirmations = ((Long)response.get("confirmations")).intValue();
-            List<JSONObject> detailList = (List<JSONObject>)response.get("details");
-            for (JSONObject detail : detailList) {
-                if (((String)detail.get("category")).equals("receive")) {
-                    String address = (String)detail.get("address");
-                    BitcoinAccount account = TokenDb.getAccount(address);
-                    if (account != null) {
-                        BigDecimal bitcoinAmount = getNumber(detail.get("amount"));
-                        BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                        tx = new BitcoinTransaction(txid, address, account.getAccountId(),
-                                bitcoinAmount.movePointRight(8).longValue(),
-                                tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue(),
-                                confirmations);
-                        break;
-                    }
-                }
-            }
-        } catch (IOException exc) {
-            Logger.logErrorMessage("Unable to get transaction", exc);
-        }
-        return tx;
     }
 
     /**
@@ -211,27 +260,6 @@ public class BitcoinProcessor {
             Logger.logErrorMessage("Unable to get new Bitcoin address", exc);
         }
         return address;
-    }
-
-    /**
-     * Get a numeric value based on the object type
-     *
-     * @param   obj             Parsed object
-     * @return                  Numeric value
-     * @throws  IOException     Invalid numeric object
-     */
-    private static BigDecimal getNumber(Object obj) throws IOException {
-        BigDecimal result;
-        if (obj instanceof Double) {
-            result = BigDecimal.valueOf((Double)obj);
-        } else if (obj instanceof Long) {
-            result = BigDecimal.valueOf((Long)obj);
-        } else if (obj instanceof String) {
-            result = new BigDecimal((String)obj);
-        } else {
-            throw new IOException("Unrecognized numeric result type");
-        }
-        return result;
     }
 
     /**
@@ -305,4 +333,162 @@ public class BitcoinProcessor {
         }
         return response;
     }
+
+    /**
+     * New Bitcoin block received
+     */
+    static void blockReceived() {
+        if (!TokenAddon.isSuspended()) {
+            try {
+                processingQueue.put(true);
+            } catch (InterruptedException exc) {
+                // Ignore since the queue is unbounded
+            }
+        }
+    }
+
+    /**
+     * Process Bitcoin blocks
+     */
+    @SuppressWarnings("unchecked")
+    @Override
+    public void run() {
+        Logger.logInfoMessage("TokenExchange Bitcoin block processor started");
+        try {
+            while (processingQueue.take()) {
+                if (TokenAddon.isSuspended()) {
+                    continue;
+                }
+                obtainLock();
+                try {
+                    JSONObject response;
+                    String blockHash;
+                    byte[] blockId;
+                    //
+                    // Get the current chain height and best block
+                    //
+                    response = issueRequest("getbestblockhash", "[]");
+                    String currentBlockHash = (String)response.get("result");
+                    if (currentBlockHash.equals(bestBlockHash)) {
+                        Logger.logDebugMessage("Best block already in database");
+                        continue;
+                    }
+                    response = issueRequest("getblockcount", "[]");
+                    int currentHeight = ((Long)response.get("result")).intValue();
+                    response = issueRequest("getblockhash", "[" + currentHeight + "]");
+                    blockHash = (String)response.get("result");
+                    //
+                    // Locate the junction point between our chain and the current best chain
+                    //
+                    if (currentHeight != chainHeight + 1 || !blockHash.equals(bestBlockHash)) {
+                        while (chainHeight > 0) {
+                            blockId = TokenDb.getChainBlock(chainHeight);
+                            if (blockId == null) {
+                                bestBlockHash = "";
+                                break;
+                            }
+                            bestBlockHash = Convert.toHexString(blockId);
+                            response = issueRequest("getblockhash", "[" + chainHeight + "]");
+                            blockHash = (String)response.get("result");
+                            if (blockHash.equals(bestBlockHash)) {
+                                break;
+                            }
+                            Logger.logDebugMessage("Popping Bitcoin block at height " + chainHeight);
+                            if (!TokenDb.popChainBlock(chainHeight)) {
+                                throw new RuntimeException("Unable to pop chain block");
+                            }
+                            chainHeight--;
+                        }
+                    }
+                    if (chainHeight == 0) {
+                        chainHeight = Math.max(0, currentHeight - TokenAddon.confirmations - 1);
+                        bestBlockHash = "";
+                    }
+                    String junctionBlockHash = bestBlockHash;
+                    //
+                    // Update the Bitcoin block chain
+                    //
+                    for (int height = chainHeight + 1; height < currentHeight; height++) {
+                        response = issueRequest("getblockhash", "[" + height + "]");
+                        blockHash = (String)response.get("result");
+                        if (!TokenDb.storeChainBlock(height, Convert.parseHexString(blockHash))) {
+                            throw new RuntimeException("Unable to store chain block");
+                        }
+                    }
+                    if (!TokenDb.storeChainBlock(currentHeight, Convert.parseHexString(currentBlockHash))) {
+                        throw new RuntimeException("Unable to store chain block");
+                    }
+                    chainHeight = currentHeight;
+                    bestBlockHash = currentBlockHash;
+                    //
+                    // Add transactions received since the junction block
+                    //
+                    response = issueRequest("listsinceblock", "[\"" + junctionBlockHash + "\"]");
+                    response = (JSONObject)response.get("result");
+                    List<JSONObject> txList = (List)response.get("transactions");
+                    for (JSONObject txJSON : txList) {
+                        String txHash = (String)txJSON.get("txid");
+                        byte[] txId = Convert.parseHexString(txHash);
+                        if (TokenDb.transactionExists(txId)) {
+                            Logger.logDebugMessage("Transaction " + txHash + " is already in the database");
+                            continue;
+                        }
+                        String category = (String)txJSON.get("category");
+                        int confirmations = ((Long)txJSON.get("confirmations")).intValue();
+                        if (!category.equals("receive") || confirmations < 1) {
+                            continue;
+                        }
+                        String address = (String)txJSON.get("address");
+                        BigDecimal bitcoinAmount = getNumber(txJSON.get("amount"));
+                        int height = ((Long)txJSON.get("blockindex")).intValue();
+                        BitcoinAccount account = TokenDb.getAccount(address);
+                        if (account != null) {
+                            BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
+                            BitcoinTransaction tx = new BitcoinTransaction(txId, height, address,
+                                    account.getAccountId(),
+                                    bitcoinAmount.movePointRight(8).longValue(),
+                                    tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
+                            if (!TokenDb.storeTransaction(tx)) {
+                                throw new RuntimeException("Unable to store transaction");
+                            }
+                        }
+                    }
+                    //
+                    // Process pending transactions
+                    //
+                    TokenCurrency.processTransactions();
+                } catch (Exception exc) {
+                    Logger.logErrorMessage("Error while processing Bitcoin blocks, processing suspended", exc);
+                    TokenAddon.suspend();
+                } finally {
+                    releaseLock();
+                }
+            }
+            Logger.logInfoMessage("TokenExchange Bitcoin block processor stopped");
+        } catch (Throwable exc) {
+            Logger.logErrorMessage("TokenExchange Bitcoin block processor encountered fatal exception", exc);
+        }
+    }
+
+    /**
+     * Get a numeric value based on the object type
+     *
+     * @param   obj             Parsed object
+     * @return                  Numeric value
+     * @throws  IOException     Invalid numeric object
+     */
+    private static BigDecimal getNumber(Object obj) throws IOException {
+        BigDecimal result;
+        if (obj instanceof Double) {
+            result = BigDecimal.valueOf((Double)obj);
+        } else if (obj instanceof Long) {
+            result = BigDecimal.valueOf((Long)obj);
+        } else if (obj instanceof String) {
+            result = new BigDecimal((String)obj);
+        } else {
+            throw new IOException("Unrecognized numeric result type");
+        }
+        return result;
+    }
+
 }

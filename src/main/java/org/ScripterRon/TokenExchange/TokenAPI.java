@@ -20,7 +20,6 @@ import nxt.http.APITag;
 import nxt.http.ParameterException;
 import nxt.util.Convert;
 import nxt.util.JSON;
-import nxt.util.Logger;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -70,12 +69,6 @@ import javax.servlet.http.HttpServletRequest;
  */
 public class TokenAPI extends APIServlet.APIRequestHandler {
 
-    /** Bitcoin processing lock */
-    private static final Object bitcoinLock = new Object();
-
-    /** Processing Bitcoin transactions */
-    private static volatile boolean processingTransactions = false;
-
     /**
      * Create the API request handler
      */
@@ -118,6 +111,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("confirmations", TokenAddon.confirmations);
                 response.put("bitcoindAddress", TokenAddon.bitcoindAddress);
                 response.put("bitcoindTxFee", TokenAddon.bitcoindTxFee.toPlainString());
+                response.put("bitcoinChainHeight", BitcoinProcessor.getChainHeight());
                 response.put("suspended", TokenAddon.isSuspended());
                 break;
             case "getTokens":
@@ -255,33 +249,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("transactions", txArray);
                 break;
             case "blockReceived":
-                idString = Convert.emptyToNull(req.getParameter("id"));
-                synchronized(bitcoinLock) {
-                    if (!processingTransactions) {
-                        processingTransactions = true;
-                        TokenCurrency.processTransactions();
-                        processingTransactions = false;
-                    }
-                }
-                response.put("processed", true);
-                break;
-            case "transactionReceived":
-                idString = Convert.emptyToNull(req.getParameter("id"));
-                byte[] txid = Convert.parseHexString(idString);
-                synchronized(bitcoinLock) {
-                    if (TokenDb.getTransaction(txid) == null) {
-                        BitcoinTransaction tx = BitcoinProcessor.getTransaction(txid);
-                        if (tx != null) {
-                            if (TokenDb.storeTransaction(tx)) {
-                                Logger.logInfoMessage("Bitcoin transaction " + idString + " added to database");
-                            } else {
-                                Logger.logErrorMessage("Bitcoin transaction " + idString + " was not processed");
-                            }
-                        } else {
-                            Logger.logWarningMessage("Bitcoin transaction " + idString + " does have a Nxt account");
-                        }
-                    }
-                }
+                BitcoinProcessor.blockReceived();
                 response.put("processed", true);
                 break;
             default:

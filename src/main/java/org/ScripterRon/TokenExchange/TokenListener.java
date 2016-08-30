@@ -92,7 +92,7 @@ public class TokenListener implements Runnable {
      */
     @Override
     public void run() {
-        Logger.logInfoMessage("TokenExchange block listener started");
+        Logger.logInfoMessage("TokenExchange Nxt block processor started");
         try {
             //
             // Loop until 0 is pushed on to the stack
@@ -129,10 +129,9 @@ public class TokenListener implements Runnable {
                         if (TokenDb.tokenExists(tx.getId())) {
                             continue;
                         }
-                        Logger.logDebugMessage("Found token redemption transaction "
-                                + Long.toUnsignedString(tx.getId()) + " from " + Convert.rsAccount(tx.getSenderId()));
                         if (msg == null || !msg.isText()) {
-                            Logger.logErrorMessage("Token redemption transaction does not have a plain text message");
+                            Logger.logErrorMessage("Token redemption transaction " +
+                                    Long.toUnsignedString(tx.getId()) + " does not have a plain text message");
                             continue;
                         }
                         String bitcoinAddress = Convert.toString(msg.getMessage());
@@ -141,7 +140,9 @@ public class TokenListener implements Runnable {
                         BigDecimal bitcoinAmount = tokenAmount.multiply(TokenAddon.exchangeRate);
                         TokenTransaction token = new TokenTransaction(tx.getId(), tx.getSenderId(),
                                 block.getHeight(), units, bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
-                        TokenDb.storeToken(token);
+                        if (!TokenDb.storeToken(token)) {
+                            throw new RuntimeException("Unable to store token transaction in TokenExchange database");
+                        }
                         Logger.logDebugMessage("Redeeming " + tokenAmount.toPlainString() + " units for "
                                     + bitcoinAmount.toPlainString() + " BTC to " + bitcoinAddress);
                     }
@@ -156,7 +157,7 @@ public class TokenListener implements Runnable {
                 if (!TokenAddon.isSuspended() && !blockchainProcessor.isScanning()) {
                     blockchain.readLock();
                     try {
-                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight()-TokenAddon.confirmations);
+                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.confirmations);
                         for (TokenTransaction token : tokenList) {
                             if (!BitcoinProcessor.sendBitcoins(token)) {
                                 Logger.logErrorMessage("Unable to send bitcoins; send suspended");
@@ -169,9 +170,9 @@ public class TokenListener implements Runnable {
                     }
                 }
             }
-            Logger.logInfoMessage("TokenExchange block listened stopped");
+            Logger.logInfoMessage("TokenExchange Nxt block processor stopped");
         } catch (Throwable exc) {
-            Logger.logErrorMessage("TokenExchange listener encountered fatal exception", exc);
+            Logger.logErrorMessage("TokenExchange Nxt block processor encountered fatal exception", exc);
         }
     }
 }
