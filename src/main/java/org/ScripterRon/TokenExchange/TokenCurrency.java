@@ -17,7 +17,6 @@ package org.ScripterRon.TokenExchange;
 
 import nxt.Account;
 import nxt.Attachment;
-import nxt.Db;
 import nxt.Nxt;
 import nxt.Transaction;
 import nxt.util.Convert;
@@ -71,7 +70,6 @@ public class TokenCurrency {
                 if (!TokenDb.updateTransaction(tx)) {
                     throw new RuntimeException("Unable to update transaction in TokenExchange database");
                 }
-                Db.db.commitTransaction();
                 nxtBalance -= transaction.getFeeNQT();
                 unitBalance -= units;
                 Logger.logInfoMessage("Issued " + BigDecimal.valueOf(units, TokenAddon.currencyDecimals).toPlainString()

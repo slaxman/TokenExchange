@@ -71,6 +71,7 @@ public class TokenListener implements Runnable {
         // Start listener thread
         //
         listenerThread = new Thread(new TokenListener());
+        listenerThread.setDaemon(true);
         listenerThread.start();
     }
 

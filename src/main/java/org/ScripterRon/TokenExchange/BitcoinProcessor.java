@@ -18,6 +18,7 @@ package org.ScripterRon.TokenExchange;
 import nxt.Db;
 import nxt.util.Convert;
 import nxt.util.Logger;
+import nxt.util.ThreadPool;
 
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
@@ -34,7 +35,9 @@ import java.util.Base64;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Interface between NRS and the Bitcoin server
@@ -121,10 +124,18 @@ public class BitcoinProcessor implements Runnable {
         BigDecimal balance = getNumber(response.get("result"));
         Logger.logInfoMessage("Bitcoin wallet: Balance " + balance.toPlainString() + " BTC");
         //
-        // Start our processing thread
+        // Start our processing thread after NRS initialization is complete
         //
-        processingThread = new Thread(new BitcoinProcessor());
-        processingThread.start();
+        ThreadPool.runAfterStart(() -> {
+            processingThread = new Thread(new BitcoinProcessor());
+            processingThread.setDaemon(true);
+            processingThread.start();
+            try {
+                processingQueue.put(true);
+            } catch (InterruptedException exc) {
+                // Ignored since the queue is unbounded
+            }
+        });
     }
 
     /**
@@ -410,16 +421,19 @@ public class BitcoinProcessor implements Runnable {
                     //
                     // Update the Bitcoin block chain
                     //
+                    Map<String, Integer> blockMap = new HashMap<>();
                     for (int height = chainHeight + 1; height < currentHeight; height++) {
                         response = issueRequest("getblockhash", "[" + height + "]");
                         blockHash = (String)response.get("result");
                         if (!TokenDb.storeChainBlock(height, Convert.parseHexString(blockHash))) {
                             throw new RuntimeException("Unable to store chain block");
                         }
+                        blockMap.put(blockHash, height);
                     }
                     if (!TokenDb.storeChainBlock(currentHeight, Convert.parseHexString(currentBlockHash))) {
                         throw new RuntimeException("Unable to store chain block");
                     }
+                    blockMap.put(currentBlockHash, currentHeight);
                     chainHeight = currentHeight;
                     bestBlockHash = currentBlockHash;
                     //
@@ -442,7 +456,15 @@ public class BitcoinProcessor implements Runnable {
                         }
                         String address = (String)txJSON.get("address");
                         BigDecimal bitcoinAmount = getNumber(txJSON.get("amount"));
-                        int height = ((Long)txJSON.get("blockindex")).intValue();
+                        blockHash = (String)txJSON.get("blockhash");
+                        Integer blockHeight = blockMap.get(blockHash);
+                        int height;
+                        if (blockHeight != null) {
+                            height = blockHeight;
+                        } else {
+                            Logger.logDebugMessage("Block " + blockHash + " not found in block map");
+                            height = chainHeight;
+                        }
                         BitcoinAccount account = TokenDb.getAccount(address);
                         if (account != null) {
                             BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
@@ -456,10 +478,6 @@ public class BitcoinProcessor implements Runnable {
                         }
                     }
                     Db.db.commitTransaction();
-                    //
-                    // Process pending transactions
-                    //
-                    TokenCurrency.processTransactions();
                 } catch (Exception exc) {
                     Logger.logErrorMessage("Error while processing Bitcoin blocks, processing suspended", exc);
                     TokenAddon.suspend();
@@ -468,6 +486,10 @@ public class BitcoinProcessor implements Runnable {
                     releaseLock();
                     Db.db.endTransaction();
                 }
+                //
+                // Process pending transactions
+                //
+                TokenCurrency.processTransactions();
             }
             Logger.logInfoMessage("TokenExchange Bitcoin block processor stopped");
         } catch (Throwable exc) {
