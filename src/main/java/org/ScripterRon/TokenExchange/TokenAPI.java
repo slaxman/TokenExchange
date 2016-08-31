@@ -235,6 +235,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 txList.forEach((tx) -> {
                     JSONObject txJSON = new JSONObject();
                     txJSON.put("bitcoinTxId", Convert.toHexString(tx.getBitcoinTxId()));
+                    txJSON.put("bitcoinHeight", tx.getHeight());
                     txJSON.put("address", tx.getBitcoinAddress());
                     txJSON.put("bitcoinAmount", BigDecimal.valueOf(tx.getBitcoinAmount(), 8).toPlainString());
                     txJSON.put("tokenAmount", BigDecimal.valueOf(tx.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());

@@ -15,6 +15,7 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.Db;
 import nxt.util.Convert;
 import nxt.util.Logger;
 
@@ -359,6 +360,7 @@ public class BitcoinProcessor implements Runnable {
                 if (TokenAddon.isSuspended()) {
                     continue;
                 }
+                Db.db.beginTransaction();
                 obtainLock();
                 try {
                     JSONObject response;
@@ -430,7 +432,7 @@ public class BitcoinProcessor implements Runnable {
                         String txHash = (String)txJSON.get("txid");
                         byte[] txId = Convert.parseHexString(txHash);
                         if (TokenDb.transactionExists(txId)) {
-                            Logger.logDebugMessage("Transaction " + txHash + " is already in the database");
+                            Logger.logDebugMessage("Bitcoin transaction " + txHash + " is already in the database");
                             continue;
                         }
                         String category = (String)txJSON.get("category");
@@ -453,6 +455,7 @@ public class BitcoinProcessor implements Runnable {
                             }
                         }
                     }
+                    Db.db.commitTransaction();
                     //
                     // Process pending transactions
                     //
@@ -460,13 +463,16 @@ public class BitcoinProcessor implements Runnable {
                 } catch (Exception exc) {
                     Logger.logErrorMessage("Error while processing Bitcoin blocks, processing suspended", exc);
                     TokenAddon.suspend();
+                    Db.db.rollbackTransaction();
                 } finally {
                     releaseLock();
+                    Db.db.endTransaction();
                 }
             }
             Logger.logInfoMessage("TokenExchange Bitcoin block processor stopped");
         } catch (Throwable exc) {
             Logger.logErrorMessage("TokenExchange Bitcoin block processor encountered fatal exception", exc);
+            TokenAddon.suspend();
         }
     }
 

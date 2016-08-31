@@ -446,24 +446,17 @@ public class TokenDb {
      */
     static boolean popChainBlock(int height) {
         int count = 0;
-        try (Connection conn = Db.db.beginTransaction()) {
-            try (PreparedStatement stmt1 = conn.prepareStatement("DELETE FROM token_exchange_block "
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt1 = conn.prepareStatement("DELETE FROM token_exchange_block "
                         + "WHERE height>=?");
                  PreparedStatement stmt2 = conn.prepareStatement("DELETE FROM token_exchange_transaction "
                         + "WHERE height>=?")) {
-                stmt2.setInt(1, height);
-                stmt2.executeUpdate();
-                stmt1.setInt(1, height);
-                count = stmt1.executeUpdate();
-                Db.db.commitTransaction();
-            } catch (SQLException | RuntimeException exc) {
-                Logger.logErrorMessage("Unable to pop bitcoin chain block from TokenExchange table", exc);
-                count = 0;
-                Db.db.rollbackTransaction();
-            }
-            Db.db.endTransaction();
+            stmt2.setInt(1, height);
+            stmt2.executeUpdate();
+            stmt1.setInt(1, height);
+            count = stmt1.executeUpdate();
         } catch (SQLException | RuntimeException exc) {
-            Logger.logErrorMessage("Unable to begin database transaction for TokenExchange table", exc);
+            Logger.logErrorMessage("Unable to pop bitcoin chain block from TokenExchange table", exc);
         }
         return count != 0;
     }

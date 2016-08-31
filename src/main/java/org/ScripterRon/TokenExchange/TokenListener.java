@@ -127,6 +127,8 @@ public class TokenListener implements Runnable {
                             continue;
                         }
                         if (TokenDb.tokenExists(tx.getId())) {
+                            Logger.logDebugMessage("Token transaction " + Long.toUnsignedString(tx.getId()) +
+                                    " is already in the database");
                             continue;
                         }
                         if (msg == null || !msg.isText()) {
@@ -173,6 +175,7 @@ public class TokenListener implements Runnable {
             Logger.logInfoMessage("TokenExchange Nxt block processor stopped");
         } catch (Throwable exc) {
             Logger.logErrorMessage("TokenExchange Nxt block processor encountered fatal exception", exc);
+            TokenAddon.suspend();
         }
     }
 }
