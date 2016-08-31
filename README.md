@@ -13,7 +13,7 @@ The token-exchange.properties configuration file controls the operation of the T
     This specifies the initial value of a single currency unit in bitcoins.  For example, a value of 0.001 indicates that 1 currency unit is equal to 0.001 bitcoins.  The exchange rate can be changed using the TokenExchange setExchangeRate API.  A maximum of 8 decimal places can be specified.
  
 - currency=xxxxx    
-    This specifies the 3-5 character Nxt currency code that will be used for the token exchange.
+    This specifies the 3-5 character Nxt currency code that will be used for the token exchange.  Changing the currency will cause unprocessed transactions to use the new currency instead of the original currency.
 
 - secretPhrase=secret-phrase
     This specifies the NXT account used to issue token currency and process redemption requests.
