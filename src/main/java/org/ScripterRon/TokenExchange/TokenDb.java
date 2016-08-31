@@ -204,7 +204,7 @@ public class TokenDb {
                     stmt.execute(blockTableDefinition);
                     stmt.execute(blockIndexDefinition1);
                     stmt.execute("DROP INDEX token_exchange_transaction_idx1");
-                    stmt.execute("ALTER TABLE token_exchange_transaction ADD COLUMN height INT");
+                    stmt.execute("ALTER TABLE token_exchange_transaction ADD COLUMN IF NOT EXISTS height INT");
                     stmt.execute("UPDATE token_exchange_transaction SET height=0");
                     stmt.execute("ALTER TABLE token_exchange_transaction ALTER COLUMN height SET NOT NULL");
                     stmt.execute(transactionIndexDefinition1);
