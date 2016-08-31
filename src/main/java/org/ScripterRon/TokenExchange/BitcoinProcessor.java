@@ -462,8 +462,10 @@ public class BitcoinProcessor implements Runnable {
                         if (blockHeight != null) {
                             height = blockHeight;
                         } else {
-                            Logger.logDebugMessage("Block " + blockHash + " not found in block map");
-                            height = chainHeight;
+                            if (!junctionBlockHash.isEmpty()) {
+                                Logger.logDebugMessage("Block " + blockHash + " not found in block map");
+                            }
+                            height = chainHeight - TokenAddon.confirmations;
                         }
                         BitcoinAccount account = TokenDb.getAccount(address);
                         if (account != null) {

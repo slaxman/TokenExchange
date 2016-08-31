@@ -19,6 +19,7 @@ import nxt.Db;
 import nxt.db.DerivedDbTable;
 import nxt.util.Logger;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -44,8 +45,8 @@ public class TokenDb {
             + "height INT NOT NULL,"                // Nxt transaction height
             + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency exchanged for Bitcoin
             + "token_amount BIGINT NOT NULL,"       // Number of units redeemed / Database version
-            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
-            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
+            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount / current exchange rate
+            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address / Database description
             + "bitcoin_txid BINARY(32))";           // Bitcoin transaction identifier
     private static final String tokenIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS token_exchange_idx1 "
             + "ON token_exchange(nxt_txid)";
@@ -151,6 +152,7 @@ public class TokenDb {
      *
      * We use the nxt_txid=0 row in the token_exchange table to save status information:
      *   - token_amount is the database version
+     *   - bitcoin_amount is the current token exchange rate
      *   - bitcoin_address contains descriptive text
      *
      * @throws  SQLException    SQL error occurred
@@ -159,6 +161,9 @@ public class TokenDb {
         tokenTable = new TokenExchangeTable("token_exchange");
         try (Connection conn = Db.db.getConnection();
                 Statement stmt = conn.createStatement()) {
+            //
+            // Update the table definitions if necessary
+            //
             int version = 0;
             try {
                 try (ResultSet rs = stmt.executeQuery("SELECT token_amount FROM token_exchange WHERE nxt_txid=0")) {
@@ -209,12 +214,48 @@ public class TokenDb {
                     stmt.execute("ALTER TABLE token_exchange_transaction ALTER COLUMN height SET NOT NULL");
                     stmt.execute(transactionIndexDefinition1);
                     stmt.execute(transactionIndexDefinition3);
+                    stmt.execute("UPDATE token_exchange SET bitcoin_amount="
+                            + TokenAddon.exchangeRate.movePointRight(8).longValue()
+                            + " WHERE nxt_txid=0");
                 // Add new database version processing here
                     stmt.executeUpdate("UPDATE token_exchange SET token_amount=" + dbVersion + " WHERE nxt_txid=0");
                 default:
                     Logger.logInfoMessage("Using Version " + dbVersion + " TokenExchange database");
             }
+            //
+            // Get the current token exchange rate
+            //
+            try (ResultSet rs = stmt.executeQuery("SELECT bitcoin_amount FROM token_exchange WHERE nxt_txid=0")) {
+                if (rs.next()) {
+                    long exchangeRate = rs.getLong("bitcoin_amount");
+                    if (exchangeRate != 0) {
+                        TokenAddon.exchangeRate = BigDecimal.valueOf(exchangeRate, 8).stripTrailingZeros();
+                    }
+                }
+            }
         }
+    }
+
+    /**
+     * Set the token exchange rate
+     *
+     * @param   rate            Exchange rate
+     * @return                  TRUE if the exchange rate was set
+     */
+    static boolean setExchangeRate(BigDecimal rate) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE token_exchange "
+                        + "SET bitcoin_amount=? WHERE nxt_txid=0")) {
+            stmt.setLong(1, rate.movePointRight(8).longValue());
+            count = stmt.executeUpdate();
+            if (count > 0) {
+                TokenAddon.exchangeRate = rate;
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to set token exchange rate in TokenExchange table", exc);
+        }
+        return count != 0;
     }
 
     /**

@@ -1,6 +1,12 @@
 TokenExchange Change Log
 =========================
 
+Version 1.2.0
+  - Add TokenExchange setExchangeRate API to modify the exchange rate
+  - HEIGHT column already defined when creating a new database
+  - Incorrect chain height stored in bitcoin transaction
+  - Begin SQL transaction before updating bitcoin block chain
+  
 Version 1.1.0
   - TokenExchange no longer uses Bitcoin wallet notifications
     - walletnotify.sh is no longer used

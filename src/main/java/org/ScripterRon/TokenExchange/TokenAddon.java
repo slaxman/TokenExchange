@@ -117,7 +117,11 @@ public class TokenAddon implements AddOn {
             Properties properties = new Properties();
             Nxt.loadProperties(properties, "token-exchange.properties", false);
             confirmations = getIntegerProperty(properties, "confirmations", true);
-            exchangeRate = getDecimalProperty(properties, "exchangeRate", true);
+            exchangeRate = getDecimalProperty(properties, "exchangeRate", true)
+                    .movePointRight(8)
+                    .divideToIntegralValue(BigDecimal.ONE)
+                    .movePointLeft(8)
+                    .stripTrailingZeros();
             bitcoindTxFee = getDecimalProperty(properties, "bitcoindTxFee", true);
             bitcoindAddress = getStringProperty(properties, "bitcoindAddress", true);
             bitcoindUser = getStringProperty(properties, "bitcoindUser", true);
