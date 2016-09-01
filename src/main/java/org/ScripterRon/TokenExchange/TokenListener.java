@@ -28,6 +28,7 @@ import nxt.util.Convert;
 import nxt.util.Logger;
 
 import java.math.BigDecimal;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.List;
 
@@ -39,13 +40,16 @@ public class TokenListener implements Runnable {
     /** Pending blocks queue */
     private static final LinkedBlockingQueue<Long> blockQueue = new LinkedBlockingQueue<>();
 
+    /** Bitcoin wallet initialization latch */
+    private static final CountDownLatch walletLatch = new CountDownLatch(1);
+
     /** Listener thread */
     private static Thread listenerThread;
 
-    /** Blockchain */
+    /** Block chain */
     private static final Blockchain blockchain = Nxt.getBlockchain();
 
-    /** Blockchain processor */
+    /** Block chain processor */
     private static final BlockchainProcessor blockchainProcessor = Nxt.getBlockchainProcessor();
 
     /**
@@ -72,7 +76,7 @@ public class TokenListener implements Runnable {
         //
         // Start listener thread
         //
-        listenerThread = new Thread(new TokenListener());
+        listenerThread = new Thread(new TokenListener(), "TokenExchange Nxt Processor");
         listenerThread.setDaemon(true);
         listenerThread.start();
     }
@@ -83,7 +87,9 @@ public class TokenListener implements Runnable {
     static void shutdown() {
         if (listenerThread != null) {
             try {
+                walletLatch.countDown();
                 blockQueue.put(0L);
+                listenerThread.join(5000);
             } catch (InterruptedException exc) {
                 // Ignored since the queue is unbounded
             }
@@ -91,12 +97,29 @@ public class TokenListener implements Runnable {
     }
 
     /**
+     * Release the wallet latch after the Bitcoin wallet has been initialized
+     */
+    static void walletInitialized() {
+        walletLatch.countDown();
+    }
+
+    /**
      * Process new blocks
      */
     @Override
     public void run() {
-        Logger.logInfoMessage("TokenExchange Nxt block processor started");
+        Logger.logInfoMessage("TokenExchange Nxt processor started");
         try {
+            //
+            // Wait until the Bitcoin wallet is initialized
+            //
+            try {
+                walletLatch.await();
+            } catch (InterruptedException exc) {
+                Logger.logErrorMessage("TokenExchange Nxt processor interrupted, processing terminated");
+                return;
+            }
+            BitcoinWallet.propagateContext();
             //
             // Loop until 0 is pushed on to the stack
             //
@@ -193,28 +216,31 @@ public class TokenListener implements Runnable {
                 }
                 //
                 // Process pending redemptions that are now confirmed.  We will stop sending bitcoins
-                // if we are unable to communicate with the bitcoind server.  We also won't send
+                // if we are unable to communicate with the bitcoin server.  We also won't send
                 // bitcoins while scanning the block chain.
                 //
                 if (!TokenAddon.isSuspended() && !blockchainProcessor.isScanning()) {
                     blockchain.readLock();
                     try {
-                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.confirmations);
+                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.nxtConfirmations);
                         for (TokenTransaction token : tokenList) {
-                            if (!BitcoinProcessor.sendBitcoins(token)) {
-                                Logger.logErrorMessage("Unable to send bitcoins; send suspended");
-                                TokenAddon.suspend();
-                                break;
-                            }
+                            String address = token.getBitcoinAddress();
+                            BigDecimal amount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
+                            String txString = BitcoinWallet.sendCoins(address, amount);
+                            token.setExchanged(Convert.parseHexString(txString));
+                            TokenDb.updateToken(token);
                         }
+                    } catch (Exception exc) {
+                        Logger.logErrorMessage("Unable to send Bitcoins, processing suspended", exc);
+                        TokenAddon.suspend();
                     } finally {
                         blockchain.readUnlock();
                     }
                 }
             }
-            Logger.logInfoMessage("TokenExchange Nxt block processor stopped");
+            Logger.logInfoMessage("TokenExchange Nxt processor stopped");
         } catch (Throwable exc) {
-            Logger.logErrorMessage("TokenExchange Nxt block processor encountered fatal exception", exc);
+            Logger.logErrorMessage("TokenExchange Nxt processor encountered fatal exception", exc);
             TokenAddon.suspend();
         }
     }

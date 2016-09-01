@@ -1,6 +1,9 @@
 TokenExchange Change Log
 =========================
 
+Version 2.0.0
+  - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
+  
 Version 1.3.0
   - Move TokenExchange tables to a separate schema to avoid conflicts
   - Null pointer exception if redemption account does not have currency

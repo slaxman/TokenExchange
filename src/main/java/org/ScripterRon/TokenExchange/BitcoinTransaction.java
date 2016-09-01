@@ -30,7 +30,7 @@ class BitcoinTransaction {
     private final String bitcoinAddress;
 
     /** Bitcoin block height */
-    private final int height;
+    private int height;
 
     /** Bitcoin transaction amount */
     private final long bitcoinAmount;
@@ -109,6 +109,15 @@ class BitcoinTransaction {
      */
     int getHeight() {
         return height;
+    }
+
+    /**
+     * Set the Bitcoin block height
+     *
+     * @param   height          Block height
+     */
+    void setHeight(int height) {
+        this.height = height;
     }
 
     /**

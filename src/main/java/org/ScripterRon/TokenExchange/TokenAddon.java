@@ -24,6 +24,7 @@ import nxt.http.APIServlet;
 import nxt.util.Convert;
 import nxt.util.Logger;
 
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.util.Properties;
@@ -35,6 +36,14 @@ import java.util.Properties;
  * specified currency.  For each transfer transaction, a token is created and stored in the
  * token exchange database.  When the required number of confirmations have been received,
  * Bitcoins are sent to the target Bitcoin address using the token exchange rate.
+ *
+ * TokenExchange also listens for Bitcoins received by an address associated with a Nxt
+ * account.  For each Bitcoin transaction, an exchange transaction is created and stored
+ * in the token exchange database.  When the required number of confirmation have been received,
+ * token currency is sent to the associated Nxt account using the token exchange rate.
+ *
+ * TokenExchange includes a Bitcoin SPV wallet which communicates with one or more Bitcoin
+ * servers.  The SPV wallet handles receiving and sending Bitcoins.
  */
 public class TokenAddon implements AddOn {
 
@@ -46,6 +55,12 @@ public class TokenAddon implements AddOn {
 
     /** Add-on processing suspended */
     private static volatile boolean suspended = false;
+
+    /** Application name */
+    static String applicationName;
+
+    /** Application version */
+    static String applicationVersion;
 
     /** Token exchange rate */
     static BigDecimal exchangeRate;
@@ -68,26 +83,20 @@ public class TokenAddon implements AddOn {
     /** Token account identifier */
     static long accountId;
 
-    /** Number of confirmations */
-    static int confirmations;
+    /** Token account RS identifier */
+    static String accountIdRS;
 
-    /** Bitcoind address */
-    static String bitcoindAddress;
+    /** Number of Nxt confirmations */
+    static int nxtConfirmations;
 
-    /** Bitcoind user */
-    static String bitcoindUser;
+    /** Number of Bitcoin confirmations */
+    static int bitcoinConfirmations;
 
-    /** Bitcoind password */
-    static String bitcoindPassword;
+    /** Bitcoin transaction fee */
+    static BigDecimal bitcoinTxFee;
 
-    /** Bitcoind wallet passphrase */
-    static String bitcoindWalletPassphrase;
-
-    /** Bitcoind transaction fee */
-    static BigDecimal bitcoindTxFee;
-
-    /** Bitcoind RPC logging */
-    static boolean bitcoindLogging;
+    /** Bitcoin server host and port */
+    static String bitcoinServer;
 
     /**
      * Initialize the TokenExchange add-on
@@ -95,6 +104,20 @@ public class TokenAddon implements AddOn {
     @Override
     public void init() {
         try {
+            //
+            // Get our application build properties
+            //
+            Class<?> mainClass = Class.forName("org.ScripterRon.TokenExchange.TokenAddon");
+            try (InputStream classStream = mainClass.getClassLoader().getResourceAsStream("META-INF/token-exchange-application.properties")) {
+                if (classStream == null) {
+                    throw new IllegalArgumentException("Application build properties not found");
+                }
+                Properties applicationProperties = new Properties();
+                applicationProperties.load(classStream);
+                applicationName = applicationProperties.getProperty("application.name");
+                applicationVersion = applicationProperties.getProperty("application.version");
+            }
+            Logger.logInfoMessage(String.format("Initializing %s Version %s", applicationName, applicationVersion));
             //
             // Verify the NRS version
             //
@@ -116,21 +139,19 @@ public class TokenAddon implements AddOn {
             //
             Properties properties = new Properties();
             Nxt.loadProperties(properties, "token-exchange.properties", false);
-            confirmations = getIntegerProperty(properties, "confirmations", true);
+            nxtConfirmations = getIntegerProperty(properties, "nxtConfirmations", true);
+            bitcoinConfirmations = getIntegerProperty(properties, "bitcoinConfirmations", true);
             exchangeRate = getDecimalProperty(properties, "exchangeRate", true)
                     .movePointRight(8)
                     .divideToIntegralValue(BigDecimal.ONE)
                     .movePointLeft(8)
                     .stripTrailingZeros();
-            bitcoindTxFee = getDecimalProperty(properties, "bitcoindTxFee", true);
-            bitcoindAddress = getStringProperty(properties, "bitcoindAddress", true);
-            bitcoindUser = getStringProperty(properties, "bitcoindUser", true);
-            bitcoindPassword = getStringProperty(properties, "bitcoindPassword", true);
-            bitcoindWalletPassphrase = getStringProperty(properties, "bitcoindWalletPassphrase", false);
-            bitcoindLogging = getBooleanProperty(properties, "bitcoindLogging", false);
+            bitcoinTxFee = getDecimalProperty(properties, "bitcoinTxFee", true);
+            bitcoinServer = getStringProperty(properties, "bitcoinServer", false);
             secretPhrase = getStringProperty(properties, "secretPhrase", true);
             publicKey = Crypto.getPublicKey(secretPhrase);
             accountId = Account.getId(publicKey);
+            accountIdRS = Convert.rsAccount(accountId);
             currencyCode = getStringProperty(properties, "currency", true);
             Currency currency = Currency.getCurrencyByCode(currencyCode);
             if (currency == null) {
@@ -140,16 +161,16 @@ public class TokenAddon implements AddOn {
             currencyDecimals = currency.getDecimals();
             Account account = Account.getAccount(accountId);
             if (account == null) {
-                throw new IllegalArgumentException("TokenExchange account " + Convert.rsAccount(accountId) + " does not exist");
+                throw new IllegalArgumentException("TokenExchange account " + accountIdRS + " does not exist");
             }
-            Logger.logInfoMessage("TokenExchange account " + Convert.rsAccount(accountId) + " has "
+            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
                     + BigDecimal.valueOf(account.getUnconfirmedBalanceNQT(), 8).toPlainString()
                     + " NXT");
-            Logger.logInfoMessage("TokenExchange account " + Convert.rsAccount(accountId) + " has "
+            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
                     + BigDecimal.valueOf(Account.getUnconfirmedCurrencyUnits(accountId, currencyId), currencyDecimals).toPlainString()
                     + " units of currency " + currencyCode);
             //
-            // Initialize the token database
+            // Initialize the token exchange database
             //
             TokenDb.init();
             //
@@ -157,7 +178,7 @@ public class TokenAddon implements AddOn {
             //
             BitcoinProcessor.init();
             //
-            // Initialize the token listener
+            // Initialize the Nxt token listener
             //
             TokenListener.init();
             //
@@ -169,12 +190,12 @@ public class TokenAddon implements AddOn {
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to intialize the TokenExchange database", exc);
         } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to initialize the TokenExchange add-on", exc);
+            Logger.logErrorMessage("Unable to initialize the TokenExchange", exc);
         }
         if (initialized) {
-            Logger.logInfoMessage("TokenExchange add-on initialized");
+            Logger.logInfoMessage("TokenExchange initialized");
         } else {
-            Logger.logInfoMessage("TokenExchange add-on initialization failed");
+            Logger.logInfoMessage("TokenExchange initialization failed");
         }
     }
 
@@ -195,22 +216,6 @@ public class TokenAddon implements AddOn {
             value = null;
         }
         return value;
-    }
-
-    /**
-     * Process a boolean property
-     *
-     * @param   properties      Properties
-     * @param   name            Property name
-     * @param   required        TRUE if this is a required property
-     * @return                  Property value or 'false' if not specified
-     */
-    private boolean getBooleanProperty(Properties properties, String name, boolean required) {
-        String value = getStringProperty(properties, name, required);
-        if (value == null) {
-            return false;
-        }
-        return Boolean.valueOf(value);
     }
 
     /**
@@ -265,7 +270,7 @@ public class TokenAddon implements AddOn {
         TokenListener.shutdown();
         BitcoinProcessor.shutdown();
         initialized = false;
-        Logger.logInfoMessage("TokenExchange add-on shutdown");
+        Logger.logInfoMessage("TokenExchange shutdown");
     }
 
     /**
