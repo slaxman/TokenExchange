@@ -3,7 +3,7 @@ TokenExchange
 
 TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for bitcoins and issuing Nxt currency when receiving bitcoins.  
 
-The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt account, a bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a prunable plain message.
+The add-on watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt account, a bitcoin transaction will be initiated to send the equivalent amount of bitcoins to the bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or encrypted prunable text message.
 
 The bitcoind 'blocknotify' routine must be defined in bitcoin.conf.  The 'blocknotify' routine must issue a TokenExchange 'blockReceived' API request.  The bitcoin address must have been associated with a Nxt account using a TokenExchange 'getAddress' request.  These addresses are defined in the bitcoind wallet as well as in the TokenExchange database, so changing either the bitcoind wallet or the NRS server will invalidate the association.  The bitcoin transactions must be P2PKH (pay to public key hash).
 

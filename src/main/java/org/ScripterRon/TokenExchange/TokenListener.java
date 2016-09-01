@@ -15,6 +15,7 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.Account;
 import nxt.Appendix;
 import nxt.Attachment;
 import nxt.Block;
@@ -22,6 +23,7 @@ import nxt.Blockchain;
 import nxt.BlockchainProcessor;
 import nxt.Nxt;
 import nxt.Transaction;
+import nxt.crypto.EncryptedData;
 import nxt.util.Convert;
 import nxt.util.Logger;
 
@@ -114,13 +116,18 @@ public class TokenListener implements Runnable {
                     }
                     List<? extends Transaction> txList = block.getTransactions();
                     for (Transaction tx : txList) {
+                        long txId = tx.getId();
+                        String txIdString = Long.toUnsignedString(txId);
                         Attachment.MonetarySystemCurrencyTransfer transfer = null;
-                        Appendix.PrunablePlainMessage msg = null;
+                        Appendix.PrunablePlainMessage plainMsg = null;
+                        Appendix.PrunableEncryptedMessage encryptedMsg = null;
                         for (Appendix appendix : tx.getAppendages()) {
                             if (appendix instanceof Attachment.MonetarySystemCurrencyTransfer) {
                                 transfer = (Attachment.MonetarySystemCurrencyTransfer)appendix;
                             } else if (appendix instanceof Appendix.PrunablePlainMessage) {
-                                msg = (Appendix.PrunablePlainMessage)appendix;
+                                plainMsg = (Appendix.PrunablePlainMessage)appendix;
+                            } else if (appendix instanceof Appendix.PrunableEncryptedMessage) {
+                                encryptedMsg = (Appendix.PrunableEncryptedMessage)appendix;
                             }
                         }
                         if (transfer == null || transfer.getCurrencyId() != TokenAddon.currencyId ||
@@ -128,16 +135,48 @@ public class TokenListener implements Runnable {
                             continue;
                         }
                         if (TokenDb.tokenExists(tx.getId())) {
-                            Logger.logDebugMessage("Token transaction " + Long.toUnsignedString(tx.getId()) +
-                                    " is already in the database");
+                            Logger.logDebugMessage("Token transaction " + txIdString + " is already in the database");
                             continue;
                         }
-                        if (msg == null || !msg.isText()) {
-                            Logger.logErrorMessage("Token redemption transaction " +
-                                    Long.toUnsignedString(tx.getId()) + " does not have a plain text message");
+                        byte[] msg;
+                        if (plainMsg != null) {
+                            if (!plainMsg.isText()) {
+                                Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                        " does not have a text message");
+                                continue;
+                            }
+                            msg = plainMsg.getMessage();
+                            if (msg == null) {
+                                Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                        " attached message is not available");
+                                continue;
+                            }
+                        } else if (encryptedMsg != null) {
+                            if (!encryptedMsg.isText()) {
+                                Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                        " does not have a text message");
+                                continue;
+                            }
+                            byte[] senderPublicKey = Account.getPublicKey(tx.getSenderId());
+                            if (senderPublicKey == null) {
+                                Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                        " sender " + Convert.rsAccount(tx.getSenderId()) + " does not have a public key");
+                                continue;
+                            }
+                            EncryptedData encryptedData = encryptedMsg.getEncryptedData();
+                            if (encryptedData == null) {
+                                Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                        " attached message is not available");
+                                continue;
+                            }
+                            msg = Account.decryptFrom(senderPublicKey, encryptedData, TokenAddon.secretPhrase,
+                                    encryptedMsg.isCompressed());
+                        } else {
+                            Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                    " does not have an attached message");
                             continue;
                         }
-                        String bitcoinAddress = Convert.toString(msg.getMessage());
+                        String bitcoinAddress = Convert.toString(msg);
                         long units = transfer.getUnits();
                         BigDecimal tokenAmount = BigDecimal.valueOf(units, TokenAddon.currencyDecimals);
                         BigDecimal bitcoinAmount = tokenAmount.multiply(TokenAddon.exchangeRate);
