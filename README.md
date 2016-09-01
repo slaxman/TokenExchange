@@ -78,7 +78,6 @@ The following functions are available:
     Stop sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=suspend' in the HTTP request.  Token redemption requests and bitcoin deposits will still be added to the database but the requests will not be processed until sending is resumed or the NRS server is restarted.
 
 
-    
 Installation
 ============
 
@@ -97,6 +96,8 @@ Installation
 - Add 'blocknotify' to bitcoin.conf.  A sample shell script is included in the TokenExchange directory.  Copy it to a directory of your choice and set the administrator password for your NRS server.  Read access should be restricted to the bitcoind application.  For example:    
     - blocknotify=/path-to-script/blocknotify.sh %s    
 
+- Start the Bitcoin-Core server before starting the NRS server.    
+    
     
 Build
 =====

@@ -39,6 +39,12 @@ public class TokenCurrency {
             Account account = Account.getAccount(TokenAddon.accountId);
             long nxtBalance = account.getUnconfirmedBalanceNQT();
             Account.AccountCurrency currency = Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
+            if (currency == null) {
+                Logger.logErrorMessage("TokenExchange account " + Convert.rsAccount(TokenAddon.accountId) +
+                        " does not have any units of " + TokenAddon.currencyCode + " currency, processing suspended");
+                TokenAddon.suspend();
+                return;
+            }
             long unitBalance = currency.getUnconfirmedUnits();
             List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
             int chainHeight = BitcoinProcessor.getChainHeight();
@@ -77,7 +83,7 @@ public class TokenCurrency {
                         + ", Transaction " + Long.toUnsignedString(transaction.getId()));
             }
         } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to processing Bitcoin transactions, processing suspended", exc);
+            Logger.logErrorMessage("Unable to process Bitcoin transactions, processing suspended", exc);
             TokenAddon.suspend();
         } finally {
             BitcoinProcessor.releaseLock();

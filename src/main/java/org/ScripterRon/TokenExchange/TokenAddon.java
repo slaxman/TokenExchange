@@ -139,6 +139,9 @@ public class TokenAddon implements AddOn {
             currencyId = currency.getId();
             currencyDecimals = currency.getDecimals();
             Account account = Account.getAccount(accountId);
+            if (account == null) {
+                throw new IllegalArgumentException("TokenExchange account " + Convert.rsAccount(accountId) + " does not exist");
+            }
             Logger.logInfoMessage("TokenExchange account " + Convert.rsAccount(accountId) + " has "
                     + BigDecimal.valueOf(account.getUnconfirmedBalanceNQT(), 8).toPlainString()
                     + " NXT");

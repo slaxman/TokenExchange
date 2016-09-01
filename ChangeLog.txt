@@ -3,6 +3,7 @@ TokenExchange Change Log
 
 Version 1.3.0
   - Move TokenExchange tables to a separate schema to avoid conflicts
+  - Null pointer exception if redemption account does not have currency
   
 Version 1.2.0
   - Add TokenExchange ssetExchangeRate API to modify the exchange rate
