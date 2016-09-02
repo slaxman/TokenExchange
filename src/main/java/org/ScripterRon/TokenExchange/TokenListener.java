@@ -72,7 +72,7 @@ public class TokenListener implements Runnable {
         //
         // Start listener thread
         //
-        listenerThread = new Thread(new TokenListener());
+        listenerThread = new Thread(new TokenListener(), "TokenExchange Nxt processor");
         listenerThread.setDaemon(true);
         listenerThread.start();
     }
@@ -95,7 +95,7 @@ public class TokenListener implements Runnable {
      */
     @Override
     public void run() {
-        Logger.logInfoMessage("TokenExchange Nxt block processor started");
+        Logger.logInfoMessage("TokenExchange Nxt processor started");
         try {
             //
             // Loop until 0 is pushed on to the stack
@@ -199,7 +199,7 @@ public class TokenListener implements Runnable {
                 if (!TokenAddon.isSuspended() && !blockchainProcessor.isScanning()) {
                     blockchain.readLock();
                     try {
-                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.confirmations);
+                        List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.nxtConfirmations);
                         for (TokenTransaction token : tokenList) {
                             if (!BitcoinProcessor.sendBitcoins(token)) {
                                 Logger.logErrorMessage("Unable to send bitcoins; send suspended");
@@ -212,9 +212,9 @@ public class TokenListener implements Runnable {
                     }
                 }
             }
-            Logger.logInfoMessage("TokenExchange Nxt block processor stopped");
+            Logger.logInfoMessage("TokenExchange Nxt processor stopped");
         } catch (Throwable exc) {
-            Logger.logErrorMessage("TokenExchange Nxt block processor encountered fatal exception", exc);
+            Logger.logErrorMessage("TokenExchange Nxt processor encountered fatal exception", exc);
             TokenAddon.suspend();
         }
     }

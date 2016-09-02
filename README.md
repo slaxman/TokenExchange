@@ -18,8 +18,11 @@ The token-exchange.properties configuration file controls the operation of the T
 - secretPhrase=secret-phrase
     This specifies the NXT account used to issue token currency and process redemption requests.
     
-- confirmations=n    
-    This specifies the number of blocks following the block containing a transaction before the transaction will be processed.  This applies to both Bitcoin transactions and Nxt transactions.
+- nxtConfirmations=n    
+    This specifies the number of blocks following the block containing a Nxt transaction before the transaction will be processed.
+    
+- bitcoinConfirmations=n    
+    This specifies the number of blocks following the block containing a Bitcoin transaction before the transaction will be processed.
     
 - bitcoindAddress=host-name:port    
     This specifies the host name and port of the bitcoind server that will be used to send bitcoins to the user.  Since bitcoind no longer supports SSL connections, the bitcoind server should be running on the same system as the NRS server to avoid security leaks.

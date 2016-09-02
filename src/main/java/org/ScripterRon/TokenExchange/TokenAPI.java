@@ -118,7 +118,8 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("currencyId", Long.toUnsignedString(TokenAddon.currencyId));
                 response.put("tokenAccount", Long.toUnsignedString(TokenAddon.accountId));
                 response.put("tokenAccountRS", Convert.rsAccount(TokenAddon.accountId));
-                response.put("confirmations", TokenAddon.confirmations);
+                response.put("nxtConfirmations", TokenAddon.nxtConfirmations);
+                response.put("bitcoinConfirmations", TokenAddon.bitcoinConfirmations);
                 response.put("bitcoindAddress", TokenAddon.bitcoindAddress);
                 response.put("bitcoindTxFee", TokenAddon.bitcoindTxFee.toPlainString());
                 response.put("bitcoinChainHeight", BitcoinProcessor.getChainHeight());

@@ -50,7 +50,7 @@ public class TokenCurrency {
             int chainHeight = BitcoinProcessor.getChainHeight();
             for (BitcoinTransaction tx : txList) {
                 String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
-                if (chainHeight - tx.getHeight() < TokenAddon.confirmations) {
+                if (chainHeight - tx.getHeight() < TokenAddon.bitcoinConfirmations) {
                     continue;
                 }
                 long units = tx.getTokenAmount();

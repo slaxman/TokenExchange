@@ -127,7 +127,7 @@ public class BitcoinProcessor implements Runnable {
         // Start our processing thread after NRS initialization is complete
         //
         ThreadPool.runAfterStart(() -> {
-            processingThread = new Thread(new BitcoinProcessor());
+            processingThread = new Thread(new BitcoinProcessor(), "TokenExchange Bitcoin processor");
             processingThread.setDaemon(true);
             processingThread.start();
             try {
@@ -365,7 +365,7 @@ public class BitcoinProcessor implements Runnable {
     @SuppressWarnings("unchecked")
     @Override
     public void run() {
-        Logger.logInfoMessage("TokenExchange Bitcoin block processor started");
+        Logger.logInfoMessage("TokenExchange Bitcoin processor started");
         try {
             while (processingQueue.take()) {
                 if (TokenAddon.isSuspended()) {
@@ -414,7 +414,7 @@ public class BitcoinProcessor implements Runnable {
                         }
                     }
                     if (chainHeight == 0) {
-                        chainHeight = Math.max(0, currentHeight - TokenAddon.confirmations - 1);
+                        chainHeight = Math.max(0, currentHeight - TokenAddon.bitcoinConfirmations - 1);
                         bestBlockHash = "";
                     }
                     String junctionBlockHash = bestBlockHash;
@@ -465,7 +465,7 @@ public class BitcoinProcessor implements Runnable {
                             if (!junctionBlockHash.isEmpty()) {
                                 Logger.logDebugMessage("Block " + blockHash + " not found in block map");
                             }
-                            height = chainHeight - TokenAddon.confirmations;
+                            height = chainHeight - TokenAddon.bitcoinConfirmations;
                         }
                         BitcoinAccount account = TokenDb.getAccount(address);
                         if (account != null) {
@@ -493,9 +493,9 @@ public class BitcoinProcessor implements Runnable {
                 //
                 TokenCurrency.processTransactions();
             }
-            Logger.logInfoMessage("TokenExchange Bitcoin block processor stopped");
+            Logger.logInfoMessage("TokenExchange Bitcoin processor stopped");
         } catch (Throwable exc) {
-            Logger.logErrorMessage("TokenExchange Bitcoin block processor encountered fatal exception", exc);
+            Logger.logErrorMessage("TokenExchange Bitcoin processor encountered fatal exception", exc);
             TokenAddon.suspend();
         }
     }
