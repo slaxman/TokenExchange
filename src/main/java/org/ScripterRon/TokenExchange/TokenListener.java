@@ -229,6 +229,7 @@ public class TokenListener implements Runnable {
                             String txString = BitcoinWallet.sendCoins(address, amount);
                             token.setExchanged(Convert.parseHexString(txString));
                             TokenDb.updateToken(token);
+                            Logger.logInfoMessage("Sent " + amount.toPlainString() + " BTC to " + address);
                         }
                     } catch (Exception exc) {
                         Logger.logErrorMessage("Unable to send Bitcoins, processing suspended", exc);
