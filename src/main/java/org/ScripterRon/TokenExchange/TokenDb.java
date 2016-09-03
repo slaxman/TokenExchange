@@ -229,6 +229,9 @@ public class TokenDb {
                     if (version > 0) {
                         stmt.execute(schemaDefinition);
                         stmt.execute(tokenTableDefinition);
+                        stmt.executeUpdate("INSERT INTO " + DB_SCHEMA + ".token "
+                            + "(nxt_txid,sender,height,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
+                            + "VALUES(0,0,0,false,1,0,'Token Exchange Database')");
                         stmt.execute(accountTableDefinition);
                         stmt.execute(blockTableDefinition);
                         stmt.execute(transactionTableDefinition);
