@@ -228,29 +228,10 @@ public class TokenDb {
                 case 3:
                     if (version > 0) {
                         stmt.execute(schemaDefinition);
-                        if (version == 2) {
-                            try (Statement tstmt = conn.createStatement();
-                                    ResultSet rs = stmt.executeQuery("SELECT 1 FROM " + DB_SCHEMA + ".token")) {
-                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".token");
-                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".block");
-                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".account");
-                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".transaction");
-                                tstmt.execute("DROP INDEX IF EXISTS token_exchange_transaction_idx1");
-                                tstmt.execute("ALTER TABLE token_exchange_transaction DROP COLUMN IF EXISTS height");
-                                tstmt.execute("ALTER TABLE token_exchange_transaction ADD COLUMN height INT AFTER db_id");
-                                tstmt.execute("UPDATE token_exchange_transaction SET height=0");
-                            } catch (SQLException exc) {
-                                // Table doesn't exist yet
-                            }
-                        }
                         stmt.execute(tokenTableDefinition);
                         stmt.execute(accountTableDefinition);
                         stmt.execute(blockTableDefinition);
                         stmt.execute(transactionTableDefinition);
-                        stmt.execute("INSERT INTO " + DB_SCHEMA + ".token SORTED SELECT * FROM token_exchange");
-                        stmt.execute("INSERT INTO " + DB_SCHEMA + ".block SORTED SELECT * FROM token_exchange_block");
-                        stmt.execute("INSERT INTO " + DB_SCHEMA + ".account SORTED SELECT * FROM token_exchange_account");
-                        stmt.execute("INSERT INTO " + DB_SCHEMA + ".transaction SORTED SELECT * FROM token_exchange_transaction");
                         stmt.execute("DROP INDEX IF EXISTS token_exchange_idx1");
                         stmt.execute("DROP INDEX IF EXISTS token_exchange_idx2");
                         stmt.execute("DROP TABLE IF EXISTS token_exchange");
