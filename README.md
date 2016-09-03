@@ -91,10 +91,6 @@ Installation
 
 - Add 'nxt.addOns=org.ScripterRon.TokenExchange.TokenAddon' to nxt.properties. If you have multiple addons, separate each addon name by a semicolon.  Create the nxt.properties file in <NRS-application-data>/conf if you don't have one yet.
 
-- Update nxt/nxt.policy and nxt/nxtdesktop.policy and add the following permission:    
-    - permission java.lang.RuntimePermission "loadLibrary.secp256k1";    
-    - Sample nxt.policy and nxtdesktop.policy files are in the TokenExchange directory.
-
 - You can enable logging for the Bitcoin wallet by adding 'org.bitcoinj.level=INFO' to <NRS-application-directory>/conf/logging.properties.
     
     
