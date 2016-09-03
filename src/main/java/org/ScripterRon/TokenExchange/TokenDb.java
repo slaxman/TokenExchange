@@ -215,7 +215,8 @@ public class TokenDb {
                     stmt.execute(blockIndexDefinition1);
                     if (version == 2) {
                         stmt.execute("DROP INDEX IF EXISTS " + DB_SCHEMA + ".transaction_idx1");
-                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".transaction ADD COLUMN IF NOT EXISTS height INT");
+                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".transaction ADD COLUMN IF NOT EXISTS height INT "
+                                + "AFTER db_id");
                         stmt.execute("UPDATE " + DB_SCHEMA + ".transaction SET height=0");
                         stmt.execute("ALTER TABLE " + DB_SCHEMA + ".transaction ALTER COLUMN height SET NOT NULL");
                         stmt.execute(transactionIndexDefinition1);
@@ -227,6 +228,21 @@ public class TokenDb {
                 case 3:
                     if (version > 0) {
                         stmt.execute(schemaDefinition);
+                        if (version == 2) {
+                            try (Statement tstmt = conn.createStatement();
+                                    ResultSet rs = stmt.executeQuery("SELECT 1 FROM " + DB_SCHEMA + ".token")) {
+                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".token");
+                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".block");
+                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".account");
+                                tstmt.execute("DROP TABLE IF EXISTS " + DB_SCHEMA + ".transaction");
+                                tstmt.execute("DROP INDEX IF EXISTS token_exchange_transaction_idx1");
+                                tstmt.execute("ALTER TABLE token_exchange_transaction DROP COLUMN IF EXISTS height");
+                                tstmt.execute("ALTER TABLE token_exchange_transaction ADD COLUMN height INT AFTER db_id");
+                                tstmt.execute("UPDATE token_exchange_transaction SET height=0");
+                            } catch (SQLException exc) {
+                                // Table doesn't exist yet
+                            }
+                        }
                         stmt.execute(tokenTableDefinition);
                         stmt.execute(accountTableDefinition);
                         stmt.execute(blockTableDefinition);
