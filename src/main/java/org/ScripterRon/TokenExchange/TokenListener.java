@@ -121,7 +121,7 @@ public class TokenListener implements Runnable {
             }
             BitcoinWallet.propagateContext();
             //
-            // Loop until 0 is pushed on to the stack
+            // Process Nxt transactions until stopped
             //
             while (true) {
                 long blockId = blockQueue.take();
@@ -138,6 +138,9 @@ public class TokenListener implements Runnable {
                         continue;
                     }
                     List<? extends Transaction> txList = block.getTransactions();
+                    //
+                    // Process pending Nxt transactions
+                    //
                     for (Transaction tx : txList) {
                         long txId = tx.getId();
                         String txIdString = Long.toUnsignedString(txId);
@@ -232,8 +235,8 @@ public class TokenListener implements Runnable {
                             Logger.logInfoMessage("Sent " + amount.toPlainString() + " BTC to " + address);
                         }
                     } catch (Exception exc) {
-                        Logger.logErrorMessage("Unable to send Bitcoins, processing suspended", exc);
-                        TokenAddon.suspend();
+                        Logger.logErrorMessage("Unable to send Bitcoins", exc);
+                        TokenAddon.suspend("Unable to send Bitcoins");
                     } finally {
                         blockchain.readUnlock();
                     }
@@ -242,7 +245,7 @@ public class TokenListener implements Runnable {
             Logger.logInfoMessage("TokenExchange Nxt processor stopped");
         } catch (Throwable exc) {
             Logger.logErrorMessage("TokenExchange Nxt processor encountered fatal exception", exc);
-            TokenAddon.suspend();
+            TokenAddon.suspend("TokenExchange Nxt processor encountered fatal exception");
         }
     }
 }

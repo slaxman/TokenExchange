@@ -63,11 +63,11 @@ public class BitcoinProcessor implements Runnable {
         // We need to initialize the Bitcoin wallet before the Nxt listener
         // receives any block events
         //
-        ThreadPool.runBeforeStart(() -> {
+        ThreadPool.runAfterStart(() -> {
             processingThread = new Thread(new BitcoinProcessor(), "TokenExchange Bitcoin Processor");
             processingThread.setDaemon(true);
             processingThread.start();
-        }, false);
+        });
     }
 
     /**
@@ -140,8 +140,7 @@ public class BitcoinProcessor implements Runnable {
                         bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
                 if (!TokenDb.storeTransaction(btx)) {
-                    Logger.logErrorMessage("Unable to store Bitcoin transaction in database, processing suspended");
-                    TokenAddon.suspend();
+                    TokenAddon.suspend("Unable to store Bitcoin transaction in database");
                     break;
                 }
                 Logger.logDebugMessage("Received Bitcoin transaction " + hash +
@@ -185,12 +184,11 @@ public class BitcoinProcessor implements Runnable {
         // Initialize the Bitcoin wallet
         //
         if (!BitcoinWallet.init()) {
-            Logger.logErrorMessage("Unable to initialize the Bitcoin wallet, Bitcoin processing terminated");
-            TokenAddon.suspend();
+            TokenAddon.suspend("Unable to initialize the Bitcoin wallet");
             return;
         }
         //
-        // Process Bitcoin requests until stopped
+        // Process Bitcoin transactions until stopped
         //
         try {
             while (processingQueue.take()) {
@@ -203,23 +201,25 @@ public class BitcoinProcessor implements Runnable {
                     long nxtBalance = account.getUnconfirmedBalanceNQT();
                     Account.AccountCurrency currency = Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
                     if (currency == null) {
-                        Logger.logErrorMessage("TokenExchange account " + Convert.rsAccount(TokenAddon.accountId) +
-                                " does not have any units of " + TokenAddon.currencyCode + " currency, processing suspended");
-                        TokenAddon.suspend();
+                        TokenAddon.suspend("TokenExchange account " + Convert.rsAccount(TokenAddon.accountId) +
+                                " does not have any " + TokenAddon.currencyCode + " currency");
                         return;
                     }
                     long unitBalance = currency.getUnconfirmedUnits();
                     List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
                     int chainHeight = lastSeenHeight;
+                    //
+                    // Processing pending Bitcoin transactions
+                    //
                     for (BitcoinTransaction tx : txList) {
                         String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
                         int txHeight = tx.getHeight();
                         if (txHeight == 0) {
                             Transaction btx = BitcoinWallet.getTransaction(bitcoinTxId);
                             if (btx == null) {
-                                Logger.logErrorMessage("Bitcoin transaction " + bitcoinTxId
+                                TokenAddon.suspend("Bitcoin transaction " + bitcoinTxId
                                         + " is no longer in the wallet");
-                                continue;
+                                break;
                             }
                             TransactionConfidence confidence = btx.getConfidence();
                             if (confidence.getConfidenceType() != TransactionConfidence.ConfidenceType.BUILDING) {
@@ -228,7 +228,7 @@ public class BitcoinProcessor implements Runnable {
                             txHeight = confidence.getAppearedAtChainHeight();
                             tx.setHeight(txHeight);
                             if (!TokenDb.updateTransaction(tx)) {
-                                throw new RuntimeException("Unable to update transaction database");
+                                throw new RuntimeException("Unable to update transaction in TokenExchange database");
                             }
                         }
                         if (chainHeight - txHeight < TokenAddon.bitcoinConfirmations) {
@@ -236,9 +236,8 @@ public class BitcoinProcessor implements Runnable {
                         }
                         long units = tx.getTokenAmount();
                         if (units > unitBalance) {
-                            Logger.logErrorMessage("Insufficient currency units available to process Bitcoin transaction " +
-                                    bitcoinTxId + ", processing suspended");
-                            TokenAddon.suspend();
+                            TokenAddon.suspend("Insufficient " + TokenAddon.currencyCode + " currency available "
+                                    + "to process Bitcoin transaction " + bitcoinTxId);
                             break;
                         }
                         Attachment attachment = new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
@@ -247,9 +246,8 @@ public class BitcoinProcessor implements Runnable {
                         builder.recipientId(tx.getAccountId()).timestamp(Nxt.getEpochTime());
                         nxt.Transaction transaction = builder.build(TokenAddon.secretPhrase);
                         if (transaction.getFeeNQT() > nxtBalance) {
-                            Logger.logErrorMessage("Insufficient NXT available to process Bitcoin transaction " +
-                                    bitcoinTxId + ", processing suspended");
-                            TokenAddon.suspend();
+                            TokenAddon.suspend("Insufficient NXT available to process Bitcoin transaction " +
+                                    bitcoinTxId);
                             break;
                         }
                         Nxt.getTransactionProcessor().broadcast(transaction);
@@ -264,8 +262,8 @@ public class BitcoinProcessor implements Runnable {
                                 + ", Transaction " + Long.toUnsignedString(transaction.getId()));
                     }
                 } catch (Exception exc) {
-                    Logger.logErrorMessage("Unable to process Bitcoin transactions, processing suspended", exc);
-                    TokenAddon.suspend();
+                    Logger.logErrorMessage("Unable to process Bitcoin transactions", exc);
+                    TokenAddon.suspend("Unable to process Bitcoin transactions");
                 } finally {
                     releaseLock();
                 }
@@ -273,7 +271,7 @@ public class BitcoinProcessor implements Runnable {
             Logger.logInfoMessage("TokenExchange Bitcoin processor stopped");
         } catch (Throwable exc) {
             Logger.logErrorMessage("TokenExchange Bitcoin processor encountered fatal exception", exc);
-            TokenAddon.suspend();
+            TokenAddon.suspend("TokenExchange Bitcoin processor encountered fatal error");
         }
     }
 }

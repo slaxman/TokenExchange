@@ -151,6 +151,9 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("bitcoinChainHeight", BitcoinWallet.getChainHeight());
                 response.put("nxtChainHeight", Nxt.getBlockchain().getHeight());
                 response.put("suspended", TokenAddon.isSuspended());
+                if (TokenAddon.isSuspended()) {
+                    response.put("suspendReason", TokenAddon.getSuspendReason());
+                }
                 break;
             case "setExchangeRate":
                 rateString = Convert.emptyToNull(req.getParameter("rate"));
@@ -213,7 +216,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("deleted", deleted);
                 break;
             case "suspend":
-                TokenAddon.suspend();
+                TokenAddon.suspend("Suspended by the TokenExchange administrator");
                 response.put("suspended", TokenAddon.isSuspended());
                 break;
             case "resume":

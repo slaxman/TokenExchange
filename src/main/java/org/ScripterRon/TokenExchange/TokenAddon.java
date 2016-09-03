@@ -56,6 +56,9 @@ public class TokenAddon implements AddOn {
     /** Add-on processing suspended */
     private static volatile boolean suspended = false;
 
+    /** Suspension reason */
+    private static volatile String suspendReason;
+
     /** Application name */
     static String applicationName;
 
@@ -303,11 +306,23 @@ public class TokenAddon implements AddOn {
     }
 
     /**
-     * Suspend processing
+     * Get the suspend reason
+     *
+     * @return                  Suspend reason or null
      */
-    static void suspend() {
+    static String getSuspendReason() {
+        return suspendReason;
+    }
+
+    /**
+     * Suspend processing
+     *
+     * @param   reason          Reason for the suspension
+     */
+    static void suspend(String reason) {
+        suspendReason = reason;
         suspended = true;
-        Logger.logWarningMessage("TokenExchange processing suspended");
+        Logger.logErrorMessage(reason + ": TokenExchange processing suspended");
     }
 
     /**
@@ -315,6 +330,7 @@ public class TokenAddon implements AddOn {
      */
     static void resume() {
         suspended = false;
+        suspendReason = null;
         Logger.logInfoMessage("TokenExchange processing resumed");
     }
 }
