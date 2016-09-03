@@ -44,6 +44,9 @@ import javax.servlet.http.HttpServletRequest;
  * <li>deleteToken - Delete a token from the database.  The 'id' parameter specifies the
  * token to be deleted.
  *
+ * <li>emptyWallet - Empty the Bitcoin wallet and send all of the coins to the target
+ * address specified by the 'address' parameter.
+ *
  * <li>getAccounts - Returns a list of Bitcoin addresses associated with Nxt accounts.
  * The 'account' parameter returns the address associated with that account.  The
  * 'address' parameter returns the accounts associated with that address.  All accounts
@@ -112,6 +115,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         String addressString;
         String amountString;
         String rateString;
+        String txString;
         boolean includeExchanged;
         BitcoinAccount account;
         long accountId;
@@ -311,8 +315,17 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                         .divideToIntegralValue(BigDecimal.ONE)
                         .movePointLeft(8)
                         .stripTrailingZeros();
-                String tx = BitcoinWallet.sendCoins(addressString, amount);
-                response.put("transaction", tx);
+                txString = BitcoinWallet.sendCoins(addressString, amount);
+                response.put("transaction", txString);
+                break;
+            case "emptyWallet" :
+                BitcoinWallet.propagateContext();
+                addressString = Convert.emptyToNull(req.getParameter("address"));
+                if (addressString == null) {
+                    return missing("address");
+                }
+                txString = BitcoinWallet.emptyWallet(addressString);
+                response.put("transaction", txString);
                 break;
             default:
                 return unknown(function);

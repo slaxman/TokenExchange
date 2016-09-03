@@ -316,4 +316,29 @@ public class BitcoinWallet {
         }
         return tx.getHashAsString();
     }
+
+    /**
+     * Empty the wallet
+     *
+     * @param   address                     Target Bitcoin address
+     * @return                              Transaction identifier
+     * @throws  IllegalArgumentException    Illegal argument specified
+     */
+    static String emptyWallet(String address) throws IllegalArgumentException {
+        Transaction tx = null;
+        Address sendAddress = Address.fromBase58(context.getParams(), address);
+        Coin coin = wallet.getBalance(Wallet.BalanceType.ESTIMATED_SPENDABLE);
+        SendRequest sendRequest = SendRequest.to(sendAddress, coin);
+        sendRequest.emptyWallet = true;
+        sendRequest.ensureMinRequiredFee = true;
+        try {
+            Wallet.SendResult sendResult = wallet.sendCoins(sendRequest);
+            tx = sendResult.tx;
+        } catch (Wallet.DustySendRequested exc) {
+            throw new IllegalArgumentException("Send request to empty the wallet results in a dust output");
+        } catch (InsufficientMoneyException exc) {
+            throw new IllegalArgumentException("Insufficient funds available to empty the wallet");
+        }
+        return tx.getHashAsString();
+    }
 }

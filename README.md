@@ -1,7 +1,7 @@
 TokenExchange
 =============
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  The databases are not compatible between Version 1 and Version 2.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  The databases are not compatible between Version 1 and Version 2.  Note that the Version 2 wallet is stored in the NRS database directory.  Be sure to empty the wallet before deleting the NRS database directory or your coins will be lost.
 
 TokenExchange watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt account, a Bitcoin transaction will be initiated to send the equivalent amount of Bitcoins to the Bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or an encrypted prunable message.
 
@@ -42,7 +42,10 @@ The following functions are available:
   
   - DeleteToken    
     Delete an entry in the token exchange database.  Specify 'function=deleteToken&id=string' in the HTTP request.
-  
+
+  - EmptyWallet    
+    Empty the Bitcoin wallet and send all of the coins to the target address.  The transaction fee will be subtracted from the amount sent.  Specify 'function=emptyWallet&address=string' in the HTTP request.
+    
   - GetAccounts    
     List bitcoin addresses that are associated with NXT users. Specify 'function=getAccounts&account=n&address=s' in the HTTP request.  Specify 'account' to return the bitcoin address associated with that NXT account or specify 'address' to return the NXT account associated with that bitcoin address.  All addresses are returned if neither parameter is specified.
 
@@ -62,10 +65,10 @@ The following functions are available:
     Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resume' in the HTTP request.  Pending requests will be processed and normal processing will resume.
   
   - SendBitcoins    
-    Send Bitcoins from the SPV wallet.  Specify 'function=sendBitcoins&address=xxxxx&amount=nn.nn' in the HTTP request.
+    Send Bitcoins from the SPV wallet.  Specify 'function=sendBitcoins&address=string&amount=number' in the HTTP request.
   
   - SetExchangeRate     
-    Set the token exchange rate.  Specify 'function=setExchangeRate&rate=n.nnn' in the HTTP request.  The initial exchange rate is specified by 'exchangeRate' in token-exchange.properties when the TokenExchange database is created.  The rate set by SetExchangeRate will be used until a new rate is specified and will persist across server restarts.
+    Set the token exchange rate.  Specify 'function=setExchangeRate&rate=number' in the HTTP request.  The initial exchange rate is specified by 'exchangeRate' in token-exchange.properties when the TokenExchange database is created.  The rate set by SetExchangeRate will be used until a new rate is specified and will persist across server restarts.
     
   - Suspend    
     Stop sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=suspend' in the HTTP request.  Token redemption requests and bitcoin deposits will still be added to the database but the requests will not be processed until sending is resumed or the NRS server is restarted.
