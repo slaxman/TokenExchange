@@ -27,7 +27,6 @@ import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
 import org.bitcoinj.core.PeerGroup;
-import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.params.MainNetParams;
@@ -108,6 +107,11 @@ public class BitcoinWallet {
                 @Override
                 protected void onSetupCompleted() {
                     peerGroup().setUseLocalhostPeerWhenPossible(false);
+                    if (TokenAddon.bitcoinServer == null) {
+                        peerGroup.setMaxConnections(6);
+                    } else {
+                        peerGroup.setMaxConnections(1);
+                    }
                     wallet().allowSpendingUnconfirmedTransactions();
                     wallet().addChangeEventListener((eventWallet) -> {
                         propagateContext();
