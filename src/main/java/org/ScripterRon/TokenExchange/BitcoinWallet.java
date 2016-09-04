@@ -20,6 +20,7 @@ import nxt.Nxt;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.Address;
+import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
 import org.bitcoinj.core.InsufficientMoneyException;
@@ -28,6 +29,7 @@ import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
 import org.bitcoinj.core.PeerGroup;
 import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.WrongNetworkException;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.params.MainNetParams;
 import org.bitcoinj.wallet.SendRequest;
@@ -71,6 +73,7 @@ public class BitcoinWallet {
      * @return                  TRUE if initialization was successful
      */
     static boolean init() {
+        Logger.logInfoMessage("Initializing the Bitcoin wallet");
         //
         // We will store the wallet files in the TokenExchange subdirectory
         // of the NRS database directory
@@ -179,6 +182,7 @@ public class BitcoinWallet {
             // blocked waiting on us, so let it start running now.
             //
             walletInitialized = true;
+            Logger.logInfoMessage("Bitcoin wallet initialization completed");
             TokenListener.walletInitialized();
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to initialize the Bitcoin wallet", exc);
@@ -254,6 +258,27 @@ public class BitcoinWallet {
      */
     static String getNewAddress() {
         return wallet.freshReceiveAddress().toString();
+    }
+
+    /**
+     * Validate a Bitcoin address
+     *
+     * @param   address         Bitcoin address
+     * @return                  TRUE if the address is valid
+     */
+    static boolean validateAddress(String address) {
+        boolean isValid = false;
+        try {
+            Address.fromBase58(getNetworkParameters(), address);
+            isValid = true;
+        } catch (WrongNetworkException exc ) {
+            Logger.logInfoMessage("Bitcoin address " + address + " is for the wrong network");
+        } catch (AddressFormatException exc) {
+            Logger.logInfoMessage("Bitcoin address " + address + " is not a valid address");
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to validate Bitcoin address " + address, exc);
+        }
+        return isValid;
     }
 
     /**

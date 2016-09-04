@@ -49,7 +49,7 @@ public class BitcoinProcessor implements Runnable {
     private static final LinkedBlockingQueue<Boolean> processingQueue = new LinkedBlockingQueue<>();
 
     /** Last seen chain height */
-    private static int lastSeenHeight = 0;
+    private static volatile int lastSeenHeight = 0;
 
     /**
      * Initialize the Bitcoin processor
@@ -58,10 +58,9 @@ public class BitcoinProcessor implements Runnable {
      */
     static void init() throws IllegalArgumentException {
         //
-        // Run our processing thread before NRS initialization is completed
-        //
-        // We need to initialize the Bitcoin wallet before the Nxt listener
-        // receives any block events
+        // Run our Bitcoin processing thread after NRS initialization is completed.
+        // Note that the Nxt processing thread will wait until the Bitcoin wallet
+        // has been initialized.
         //
         ThreadPool.runAfterStart(() -> {
             processingThread = new Thread(new BitcoinProcessor(), "TokenExchange Bitcoin Processor");
@@ -109,7 +108,7 @@ public class BitcoinProcessor implements Runnable {
         try {
             int height;
             if (TokenDb.transactionExists(hash.getBytes())) {
-                Logger.logInfoMessage("Bitcoin transaction " + hash + " already in database");
+                Logger.logDebugMessage("Bitcoin transaction " + hash + " already in database");
                 return;
             }
             TransactionConfidence confidence = tx.getConfidence();
@@ -118,14 +117,16 @@ public class BitcoinProcessor implements Runnable {
             } else if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.PENDING) {
                 height = 0;
             } else {
-                Logger.logErrorMessage("Bitcoin transaction " + hash + " is not PENDING or BUILDING, ignored");
+                Logger.logErrorMessage("Bitcoin transaction " + hash + " is not PENDING or BUILDING, "
+                        + "transaction ignored");
                 return;
             }
             List<TransactionOutput> outputs = tx.getOutputs();
             for (TransactionOutput output : outputs) {
                 Address address = output.getAddressFromP2PKHScript(BitcoinWallet.getNetworkParameters());
                 if (address == null) {
-                    Logger.logErrorMessage("Bitcoin transaction " + hash + " is not P2PKH, transaction ignored");
+                    Logger.logErrorMessage("Bitcoin transaction " + hash + " is not P2PKH, "
+                            + "transaction ignored");
                     return;
                 }
                 String bitcoinAddress = address.toBase58();
@@ -184,7 +185,7 @@ public class BitcoinProcessor implements Runnable {
         // Initialize the Bitcoin wallet
         //
         try {
-            Thread.sleep(30000);
+            Thread.sleep(60000);
         } catch (InterruptedException exc) {
             // Don't care
         }

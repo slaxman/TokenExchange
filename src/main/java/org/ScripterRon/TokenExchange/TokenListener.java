@@ -168,41 +168,47 @@ public class TokenListener implements Runnable {
                         if (plainMsg != null) {
                             if (!plainMsg.isText()) {
                                 Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                        " does not have a text message");
+                                        " does not have a text message, transaction ignored");
                                 continue;
                             }
                             msg = plainMsg.getMessage();
                             if (msg == null) {
                                 Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                        " attached message is not available");
+                                        " attached message is not available, transaction ignored");
                                 continue;
                             }
                         } else if (encryptedMsg != null) {
                             if (!encryptedMsg.isText()) {
                                 Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                        " does not have a text message");
+                                        " does not have a text message, transaction ignored");
                                 continue;
                             }
                             byte[] senderPublicKey = Account.getPublicKey(tx.getSenderId());
                             if (senderPublicKey == null) {
                                 Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                        " sender " + Convert.rsAccount(tx.getSenderId()) + " does not have a public key");
+                                        " sender " + Convert.rsAccount(tx.getSenderId())
+                                        + " does not have a public key,, transaction ignored");
                                 continue;
                             }
                             EncryptedData encryptedData = encryptedMsg.getEncryptedData();
                             if (encryptedData == null) {
                                 Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                        " attached message is not available");
+                                        " attached message is not available, transaction ignored");
                                 continue;
                             }
                             msg = Account.decryptFrom(senderPublicKey, encryptedData, TokenAddon.secretPhrase,
                                     encryptedMsg.isCompressed());
                         } else {
                             Logger.logErrorMessage("Token redemption transaction " + txIdString +
-                                    " does not have an attached message");
+                                    " does not have an attached message, transaction ignored");
                             continue;
                         }
                         String bitcoinAddress = Convert.toString(msg);
+                        if (!BitcoinWallet.validateAddress(bitcoinAddress)) {
+                            Logger.logErrorMessage("Token redemption transaction " + txIdString +
+                                    " does not have a valid bitcoin address, transaction ignored");
+                            continue;
+                        }
                         long units = transfer.getUnits();
                         BigDecimal tokenAmount = BigDecimal.valueOf(units, TokenAddon.currencyDecimals);
                         BigDecimal bitcoinAmount = tokenAmount.multiply(TokenAddon.exchangeRate);
