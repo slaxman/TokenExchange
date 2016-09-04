@@ -35,6 +35,9 @@ class TokenTransaction {
     /** Block height */
     private final int height;
 
+    /** Transaction timestamp */
+    private final int timestamp;
+
     /** Tokens have been exchanged */
     private boolean exchanged;
 
@@ -53,14 +56,17 @@ class TokenTransaction {
      * @param   nxtTxId         Transaction identifier
      * @param   senderId        Sender identifier
      * @param   height          Block height
+     * @param   timestamp       Transaction timestamp
      * @param   tokenAmount     Token amount
      * @param   bitcoinAmount   Bitcoin amount
      * @param   bitcoinAddress  Bitcoin address
      */
-    TokenTransaction(long nxtTxId, long senderId, int height, long tokenAmount, long bitcoinAmount, String bitcoinAddress) {
+    TokenTransaction(long nxtTxId, long senderId, int height, int timestamp, long tokenAmount,
+                                long bitcoinAmount, String bitcoinAddress) {
         this.nxtTxId = nxtTxId;
         this.senderId = senderId;
         this.height = height;
+        this.timestamp = timestamp;
         this.tokenAmount = tokenAmount;
         this.bitcoinAmount = bitcoinAmount;
         this.bitcoinAddress = bitcoinAddress;
@@ -78,6 +84,7 @@ class TokenTransaction {
         this.nxtTxId = rs.getLong("nxt_txid");
         this.senderId = rs.getLong("sender");
         this.height = rs.getInt("height");
+        this.timestamp = rs.getInt("timestamp");
         this.tokenAmount = rs.getLong("token_amount");
         this.bitcoinAmount = rs.getLong("bitcoin_amount");
         this.bitcoinAddress = rs.getString("bitcoin_address");
@@ -115,6 +122,15 @@ class TokenTransaction {
      */
     int getHeight() {
         return height;
+    }
+
+    /**
+     * Return the transaction timestamp
+     *
+     * @return                  Transaction timestamp
+     */
+    int getTimestamp() {
+        return timestamp;
     }
 
     /**

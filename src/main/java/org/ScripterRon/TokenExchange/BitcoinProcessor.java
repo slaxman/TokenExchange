@@ -30,6 +30,7 @@ import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionOutput;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
@@ -107,6 +108,7 @@ public class BitcoinProcessor implements Runnable {
         obtainLock();
         try {
             int height;
+            int timestamp;
             if (TokenDb.transactionExists(hash.getBytes())) {
                 Logger.logDebugMessage("Bitcoin transaction " + hash + " already in database");
                 return;
@@ -114,8 +116,15 @@ public class BitcoinProcessor implements Runnable {
             TransactionConfidence confidence = tx.getConfidence();
             if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.BUILDING) {
                 height = confidence.getAppearedAtChainHeight();
+                Date txDate = tx.getUpdateTime();
+                if (txDate != null) {
+                    timestamp = Convert.toEpochTime(txDate.getTime());
+                } else {
+                    timestamp = Nxt.getEpochTime();
+                }
             } else if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.PENDING) {
                 height = 0;
+                timestamp = 0;
             } else {
                 Logger.logErrorMessage("Bitcoin transaction " + hash + " is not PENDING or BUILDING, "
                         + "transaction ignored");
@@ -136,7 +145,7 @@ public class BitcoinProcessor implements Runnable {
                 }
                 BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
                 BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                BitcoinTransaction btx = new BitcoinTransaction(hash.getBytes(), height,
+                BitcoinTransaction btx = new BitcoinTransaction(hash.getBytes(), height, timestamp,
                         bitcoinAddress, account.getAccountId(),
                         bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
@@ -185,7 +194,7 @@ public class BitcoinProcessor implements Runnable {
         // Initialize the Bitcoin wallet
         //
         try {
-            Thread.sleep(60000);
+            Thread.sleep(30000);
         } catch (InterruptedException exc) {
             // Don't care
         }
@@ -212,14 +221,14 @@ public class BitcoinProcessor implements Runnable {
                         return;
                     }
                     long unitBalance = currency.getUnconfirmedUnits();
-                    List<BitcoinTransaction> txList = TokenDb.getTransactions(null, false);
-                    int chainHeight = lastSeenHeight;
+                    List<BitcoinTransaction> txList = TokenDb.getPendingTransactions(lastSeenHeight - TokenAddon.bitcoinConfirmations);
                     //
                     // Processing pending Bitcoin transactions
                     //
                     for (BitcoinTransaction tx : txList) {
                         String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
                         int txHeight = tx.getHeight();
+                        int txTimestamp = tx.getTimestamp();
                         if (txHeight == 0) {
                             Transaction btx = BitcoinWallet.getTransaction(bitcoinTxId);
                             if (btx == null) {
@@ -233,12 +242,16 @@ public class BitcoinProcessor implements Runnable {
                             }
                             txHeight = confidence.getAppearedAtChainHeight();
                             tx.setHeight(txHeight);
+                            Date txDate = btx.getUpdateTime();
+                            if (txDate != null) {
+                                txTimestamp = Convert.toEpochTime(txDate.getTime());
+                            } else {
+                                txTimestamp = Nxt.getEpochTime();
+                            }
+                            tx.setTimestamp(txTimestamp);
                             if (!TokenDb.updateTransaction(tx)) {
                                 throw new RuntimeException("Unable to update transaction in TokenExchange database");
                             }
-                        }
-                        if (chainHeight - txHeight < TokenAddon.bitcoinConfirmations) {
-                            continue;
                         }
                         long units = tx.getTokenAmount();
                         if (units > unitBalance) {

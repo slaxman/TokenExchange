@@ -32,6 +32,9 @@ class BitcoinTransaction {
     /** Bitcoin block height */
     private int height;
 
+    /** Bitcoin transaction timestamp */
+    private int timestamp;
+
     /** Bitcoin transaction amount */
     private final long bitcoinAmount;
 
@@ -52,15 +55,17 @@ class BitcoinTransaction {
      *
      * @param   bitcoinTxId     Bitcoin transaction identifier
      * @param   height          Bitcoin block height
+     * @param   timestamp       Bitcoin transaction timestamp
      * @param   bitcoinAddress  Bitcoin address
      * @param   accountId       Nxt account identifier
      * @param   bitcoinAmount   Bitcoin transaction amount
      * @param   tokenAmount     Token units
      */
-    BitcoinTransaction(byte[] bitcoinTxId, int height, String bitcoinAddress, long accountId,
+    BitcoinTransaction(byte[] bitcoinTxId, int height, int timestamp, String bitcoinAddress, long accountId,
                                 long bitcoinAmount, long tokenAmount) {
         this.bitcoinTxId = bitcoinTxId;
         this.height = height;
+        this.timestamp = timestamp;
         this.bitcoinAddress = bitcoinAddress;
         this.accountId = accountId;
         this.bitcoinAmount = bitcoinAmount;
@@ -76,6 +81,7 @@ class BitcoinTransaction {
     BitcoinTransaction(ResultSet rs) throws SQLException {
         this.bitcoinTxId = rs.getBytes("bitcoin_txid");
         this.height = rs.getInt("height");
+        this.timestamp = rs.getInt("timestamp");
         this.bitcoinAddress = rs.getString("bitcoin_address");
         this.bitcoinAmount = rs.getLong("bitcoin_amount");
         this.tokenAmount = rs.getLong("token_amount");
@@ -105,7 +111,7 @@ class BitcoinTransaction {
     /**
      * Get the Bitcoin block height
      *
-     * @return                  Block height
+     * @return                  Block height or 0 if not in block yet
      */
     int getHeight() {
         return height;
@@ -118,6 +124,24 @@ class BitcoinTransaction {
      */
     void setHeight(int height) {
         this.height = height;
+    }
+
+    /**
+     * Get the Bitcoin transaction timestamp
+     *
+     * @return  timestamp       Transaction timestamp or 0 if not in block yet
+     */
+    int getTimestamp() {
+        return timestamp;
+    }
+
+    /**
+     * Set the Bitcoin transaction timestamp
+     *
+     * @param   height          Transaction timestamp
+     */
+    void setTimestamp(int timestamp) {
+        this.timestamp = timestamp;
     }
 
     /**

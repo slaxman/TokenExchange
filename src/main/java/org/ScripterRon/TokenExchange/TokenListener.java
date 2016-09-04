@@ -213,7 +213,8 @@ public class TokenListener implements Runnable {
                         BigDecimal tokenAmount = BigDecimal.valueOf(units, TokenAddon.currencyDecimals);
                         BigDecimal bitcoinAmount = tokenAmount.multiply(TokenAddon.exchangeRate);
                         TokenTransaction token = new TokenTransaction(tx.getId(), tx.getSenderId(),
-                                block.getHeight(), units, bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
+                                block.getHeight(), tx.getTimestamp(), units,
+                                bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
                         if (!TokenDb.storeToken(token)) {
                             throw new RuntimeException("Unable to store token transaction in TokenExchange database");
                         }

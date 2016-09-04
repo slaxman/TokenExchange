@@ -119,6 +119,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         boolean includeExchanged;
         BitcoinAccount account;
         long accountId;
+        int height;
         switch (function) {
             case "getStatus":
                 BitcoinWallet.propagateContext();
@@ -168,7 +169,6 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("processed", TokenDb.setExchangeRate(rate));
                 break;
             case "getTokens":
-                int height;
                 heightString = Convert.emptyToNull(req.getParameter("height"));
                 if (heightString == null) {
                     height = 0;
@@ -193,6 +193,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     tokenObject.put("sender", Long.toUnsignedString(token.getSenderId()));
                     tokenObject.put("senderRS", Convert.rsAccount(token.getSenderId()));
                     tokenObject.put("nxtChainHeight", token.getHeight());
+                    tokenObject.put("timestamp", token.getTimestamp());
                     tokenObject.put("exchanged", token.isExchanged());
                     tokenObject.put("tokenAmount",
                             BigDecimal.valueOf(token.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
@@ -279,17 +280,28 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
             case "getTransactions":
                 JSONArray txArray = new JSONArray();
                 addressString = Convert.emptyToNull(req.getParameter("address"));
+                heightString = Convert.emptyToNull(req.getParameter("height"));
+                if (heightString == null) {
+                    height = 0;
+                } else {
+                    try {
+                        height = Integer.valueOf(heightString);
+                    } catch (NumberFormatException exc) {
+                        return incorrect("height", exc.getMessage());
+                    }
+                }
                 includeExchangedString = Convert.emptyToNull(req.getParameter("includeExchanged"));
                 if (includeExchangedString == null) {
                     includeExchanged = false;
                 } else {
                     includeExchanged = Boolean.valueOf(includeExchangedString);
                 }
-                List<BitcoinTransaction> txList = TokenDb.getTransactions(addressString, includeExchanged);
+                List<BitcoinTransaction> txList = TokenDb.getTransactions(height, addressString, includeExchanged);
                 txList.forEach((tx) -> {
                     JSONObject txJSON = new JSONObject();
                     txJSON.put("bitcoinTxId", Convert.toHexString(tx.getBitcoinTxId()));
                     txJSON.put("bitcoinChainHeight", tx.getHeight());
+                    txJSON.put("timestamp", tx.getTimestamp());
                     txJSON.put("address", tx.getBitcoinAddress());
                     txJSON.put("bitcoinAmount", BigDecimal.valueOf(tx.getBitcoinAmount(), 8).toPlainString());
                     txJSON.put("tokenAmount", BigDecimal.valueOf(tx.getTokenAmount(), TokenAddon.currencyDecimals).toPlainString());
