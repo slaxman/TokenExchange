@@ -18,6 +18,7 @@ cp ../ChangeLog.txt ../LICENSE ../README.md ../token-exchange.properties TokenEx
 cp ../target/TokenExchange-$VERSION.jar addons/lib
 cp ../target/lib/* addons/lib
 zip -r TokenExchange-$VERSION.zip addons TokenExchange
+dos2unix TokenExchange/ChangeLog.txt TokenExchange/LICENSE TokenExchange/README.md TokenExchange/token-exchange.properties
 tar zcf TokenExchange-$VERSION.tar.gz addons TokenExchange
 exit 0
 

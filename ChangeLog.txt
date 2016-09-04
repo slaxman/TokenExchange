@@ -2,10 +2,10 @@ TokenExchange Change Log
 =========================
 
 Version 2.1.1
-  - Rename DeleteToken to DeleteNxtTransaction
+  - Rename DeleteToken to DeleteNxtTransaction (DeleteToken still accepted)
   - Add DeleteBitcoinTransaction
-  - Rename GetTokens to GetNxtTransactions
-  - Rename GetTransactions to GetBitcoinTransactions and add 'height' parameter
+  - Rename GetTokens to GetNxtTransactions (GetTokens still accepted)
+  - Rename GetTransactions to GetBitcoinTransactions and add 'height' parameter (GetTransactions still accepted)
   - Add timestamps to the transaction tables
   - Validate the supplied public key when obtaining a Bitcoin address
   - Change GetAddress to return a new address if the current address has been used

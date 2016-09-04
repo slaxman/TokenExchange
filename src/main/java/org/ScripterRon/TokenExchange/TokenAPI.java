@@ -171,6 +171,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("processed", TokenDb.setExchangeRate(rate));
                 break;
             case "getNxtTransactions":
+            case "getTokens":
                 heightString = Convert.emptyToNull(req.getParameter("height"));
                 if (heightString == null) {
                     height = 0;
@@ -210,6 +211,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("tokens", tokenArray);
                 break;
             case "deleteNxtTransaction":
+            case "deleteToken":
                 idString = Convert.emptyToNull(req.getParameter("id"));
                 if (idString == null) {
                     return missing("id");
@@ -286,6 +288,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("accounts", accountArray);
                 break;
             case "getBitcoinTransactions":
+            case "getTransactions":
                 JSONArray txArray = new JSONArray();
                 addressString = Convert.emptyToNull(req.getParameter("address"));
                 heightString = Convert.emptyToNull(req.getParameter("height"));

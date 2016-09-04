@@ -536,7 +536,7 @@ public class TokenDb {
         List<BitcoinAccount> accountList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".account "
-                        + "ORDER BY db_id")) {
+                        + "ORDER BY account_id")) {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     accountList.add(new BitcoinAccount(rs));
