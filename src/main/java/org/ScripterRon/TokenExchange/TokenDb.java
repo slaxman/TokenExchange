@@ -482,26 +482,26 @@ public class TokenDb {
     }
 
     /**
-     * Get the Bitcoin account associated with a Nxt account identifier
+     * Get the Bitcoin accounts associated with a Nxt account identifier
      *
      * @param   account_id      Account identifier
-     * @return                  Bitcoin account or null
+     * @return                  Bitcoin account list
      */
-    static BitcoinAccount getAccount(long accountId) {
-        BitcoinAccount account = null;
+    static List<BitcoinAccount> getAccount(long accountId) {
+        List<BitcoinAccount> accountList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".account "
                         + "WHERE account_id=?")) {
             stmt.setLong(1, accountId);
             try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    account = new BitcoinAccount(rs);
+                while (rs.next()) {
+                    accountList.add(new BitcoinAccount(rs));
                 }
             }
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to get account from TokenExchange table", exc);
         }
-        return account;
+        return accountList;
     }
 
     /**
@@ -610,6 +610,29 @@ public class TokenDb {
                 PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + DB_SCHEMA + ".transaction "
                         + "WHERE bitcoin_txid=?")) {
             stmt.setBytes(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    exists = true;
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to check Bitcoin transaction in TokenExchange table", exc);
+        }
+        return exists;
+    }
+
+    /**
+     * See if a Bitcoin transaction exists for the specified address
+     *
+     * @param   address         Bitcoin address
+     * @return                  TRUE if a Bitcoin transaction exists
+     */
+    static boolean transactionExists(String address) {
+        boolean exists = false;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + DB_SCHEMA + ".transaction "
+                        + "WHERE bitcoin_address=?")) {
+            stmt.setString(1, address);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     exists = true;

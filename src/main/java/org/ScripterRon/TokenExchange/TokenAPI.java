@@ -15,6 +15,7 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.Account;
 import nxt.Nxt;
 import nxt.http.APIServlet;
 import nxt.http.APITag;
@@ -117,9 +118,10 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         String rateString;
         String txString;
         boolean includeExchanged;
-        BitcoinAccount account;
         long accountId;
         int height;
+        List<BitcoinAccount> accountList;
+        BitcoinAccount account;
         switch (function) {
             case "getStatus":
                 BitcoinWallet.propagateContext();
@@ -237,10 +239,21 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     if (publicKey.length != 32) {
                         return incorrect("publicKey", "public key is not 32 bytes");
                     }
+                    byte[] accountPublicKey = Account.getPublicKey(accountId);
+                    if (accountPublicKey != null && !Arrays.equals(accountPublicKey, publicKey)) {
+                        return incorrect("publicKey", "public key does not match account public key");
+                    }
                 } else {
                     publicKey = null;
                 }
-                account = TokenDb.getAccount(accountId);
+                accountList = TokenDb.getAccount(accountId);
+                account = null;
+                for (BitcoinAccount bitcoinAccount : accountList) {
+                    if (!TokenDb.transactionExists(bitcoinAccount.getBitcoinAddress())) {
+                        account = bitcoinAccount;
+                        break;
+                    }
+                }
                 if (account == null) {
                     String address = BitcoinWallet.getNewAddress();
                     if (address == null) {
@@ -259,19 +272,15 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 addressString = Convert.emptyToNull(req.getParameter("address"));
                 if (accountString != null) {
                     accountId = Convert.parseAccountId(accountString);
-                    account = TokenDb.getAccount(accountId);
-                    if (account != null) {
-                        accountArray.add(formatAccount(account, new JSONObject()));
-                    }
-                }
-                if (addressString != null) {
+                    accountList = TokenDb.getAccount(accountId);
+                    accountList.forEach((a) -> accountArray.add(formatAccount(a, new JSONObject())));
+                } else if (addressString != null) {
                     account = TokenDb.getAccount(addressString);
                     if (account != null) {
                         accountArray.add(formatAccount(account, new JSONObject()));
                     }
-                }
-                if (accountString == null && addressString == null) {
-                    List<BitcoinAccount> accountList = TokenDb.getAccounts();
+                } else {
+                    accountList = TokenDb.getAccounts();
                     accountList.forEach((a) -> accountArray.add(formatAccount(a, new JSONObject())));
                 }
                 response.put("accounts", accountArray);

@@ -1,6 +1,15 @@
 TokenExchange Change Log
 =========================
 
+Version 2.1.1
+  - Rename DeleteToken to DeleteNxtTransaction
+  - Add DeleteBitcoinTransaction
+  - Rename GetTokens to GetNxtTransactions
+  - Rename GetTransactions to GetBitcoinTransactions and add 'height' parameter
+  - Add timestamps to the transaction tables
+  - Validate the supplied public key when obtaining a Bitcoin address
+  - Change GetAddress to return a new address if the current address has been used
+  
 Version 2.0.0
   - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
   - Return suspend reason in GetStatus response

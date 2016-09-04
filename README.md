@@ -1,5 +1,5 @@
-TokenExchange
-=============
+TokenExchange Version 2
+=======================
 
 TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  The databases are not compatible between Version 1 and Version 2.  Note that the Version 2 wallet is stored in the NRS database directory.  Be sure to empty the wallet before deleting the NRS database directory or your coins will be lost.
 
@@ -7,7 +7,7 @@ TokenExchange watches for transfer transactions of the specified currency.  If t
 
 TokenExchange watches for Bitcoins sent to a Bitcoin address that has been associated with a Nxt account.  The Bitcoin transaction must be P2PKH (pay to public key hash).  A Nxt transaction will be initiated to send the equivalent amount of currency units to the associated Nxt account.
 
-The TokenExchange Bitcoin wallet will need to be funded with Bitcoins in order to process token redemptions.  A Bitcoin address is automatically assigned to the NXT redemption account and can be displayed using the TokenExchange GetStatus API.  You can send Bitcoins to this address whenever the Bitcoin wallet needs to be funded.  The TokenExchange GetBalance API request will return the current wallet balance.  You can use the TokenExchange SendBitcoins API to send Bitcoins to an external Bitcoin address if you want to reduce the current wallet balance.
+The TokenExchange Bitcoin wallet will need to be funded with Bitcoins in order to process token redemptions.  A Bitcoin address is automatically assigned to the NXT redemption account and can be displayed using the TokenExchange GetStatus API.  You can send Bitcoins to this address whenever the Bitcoin wallet needs to be funded.  The TokenExchange GetBalance API request will return the current wallet balance.  The TokenExchange SendBitcoins API can be used to send Bitcoins to an external Bitcoin address if you want to reduce the current wallet balance.  The TokenExchange EmptyWallet API can be used to send all of the bitcoins in the wallet to an external Bitcoin address.
 
 The token-exchange.properties configuration file controls the operation of TokenExchange.  The configuration file contains the following fields:    
 
@@ -38,28 +38,33 @@ TokenExchange API
 
 TokenExchange provides an NRS API under the ADDONS tag with 'requestType=tokenExchange'.  The NRS test page (http://localhost:7876/test) can be used to issue requests or an application can issue its own HTTP requests (http://localhost:7876/nxt?requestType=tokenExchange&function=name&adminPassword=administrator-password).
 
+Nxt transactions represent requests to redeem tokens and send Bitcoins.  Bitcoin transactions represent requests to issue tokens for the received Bitcoins.
+
 The following functions are available:
   
-  - DeleteToken    
-    Delete an entry in the token exchange database.  Specify 'function=deleteToken&id=string' in the HTTP request.
+  - DeleteBitcoinTransaction    
+    Delete a Bitcoin transaction.  Specify 'function=deleteBitcoinTransaction&id=string' in the HTTP request.
+    
+  - DeleteNxtTransaction    
+    Delete a Nxt transaction.  Specify 'function=deleteNxtTransaction&id=string' in the HTTP request.  
 
   - EmptyWallet    
     Empty the Bitcoin wallet and send all of the coins to the target address.  The transaction fee will be subtracted from the amount sent.  Specify 'function=emptyWallet&address=string' in the HTTP request.
     
   - GetAccounts    
-    List bitcoin addresses that are associated with NXT users. Specify 'function=getAccounts&account=n&address=s' in the HTTP request.  Specify 'account' to return the bitcoin address associated with that NXT account or specify 'address' to return the NXT account associated with that bitcoin address.  All addresses are returned if neither parameter is specified.
+    List bitcoin addresses that are associated with NXT users. Specify 'function=getAccounts&account=n&address=s' in the HTTP request.  Specify 'account' to return the bitcoin addresses associated with that NXT account or specify 'address' to return the NXT account associated with that bitcoin address.  All addresses are returned if neither parameter is specified.
+  
+  - GetAddress    
+    Get the bitcoin address associated with a Nxt account.  Specify  'function=getAddress&account=nxt-account&publicKey=hex-string' in the HTTP request.  Bitcoins sent to this address will cause tokens to be issued to the associated Nxt account.  The public key is optional but should be specified for a new Nxt account to increase the security of the account.  A new address will be generated if the Nxt account does not have an address or if the current address has been used.  Otherwise, the current address is returned.
+  
+  - GetBitcoinTransactions    
+    List transactions received by the Bitcoin wallet for addresses associated with NXT accounts.  Specify 'function=getBitcoinTransactions&address=s&height=n&includeExchanged=true|false' in the HTTP request.  This will return all transactions at or after the specified Bitcoin block chain height.  The height defaults to 0 if it is not specified.  Specify the 'address' parameter to limit the list to transactions for that address.  Otherwise, all transactions are returned.  Specify the 'includeExchanged' parameter to return transactions that have been processed as well as pending transactions.  Otherwise, only pending transactions are returned.
+  
+  - GetNxtTransactions    
+    List currency tokens that have been redeemed.  Specify 'function=getNxtTransactions&height=n&includeExchanged=true|false' in the HTTP request.  This will return all transactions at or after the specified Nxt block chain height.  The height defaults to 0 if it is not specified.  The 'includeExchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only pending tokens are returned if 'false' is specified or the parameter is omitted.
 
   - GetStatus    
     Get the current TokenExchange status.  Specify 'function=getStatus' in the HTTP request.
-  
-  - GetTokens    
-    List currency tokens that have been redeemed.  Specify 'function=getTokens&height=n&includeExchanged=true/false' in the HTTP request.  This will return all tokens redeemed after the specified Nxt block chain height.  The height defaults to 0 if it is not specified.  The 'includeExchanged' parameter is 'true' to return exchanged tokens in addition to tokens that have not been exchanged.  Only pending tokens are returned if 'false' is specified or the parameter is omitted.
-  
-  - GetTransactions    
-    List transactions received by the Bitcoin wallet for addresses associated with NXT accounts.  Specify 'function=getTransactions&address=s&includeExchanged=true/false' in the HTTP request.  Specify the 'address' parameter to limit the list to transactions for that address.  Otherwise, all transactions are returned.  Specify the 'includeExchanged' parameter to return transactions that have been processed as well as pending transactions.  Otherwise, only pending transactions are returned.
-  
-  - RequestAddress    
-    Get the bitcoin address associated with a Nxt account.  Specify  'function=requestAddress&account=nxt-address&publicKey=hex-string' in the HTTP request.  Bitcoins sent to this address will cause tokens to be issued to the associated Nxt account.  The public key is optional but should be specified for a new Nxt account to increase the security of the account.  A new address will be generated if the Nxt account does not already have an address.
   
   - Resume    
     Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resume' in the HTTP request.  Pending requests will be processed and normal processing will resume.
