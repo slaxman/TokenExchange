@@ -699,4 +699,25 @@ public class TokenDb {
         return txList;
     }
 
+    /**
+     * Delete a Bitcoin transaction
+     *
+     * @param   id              Transaction identifier
+     * @return                  TRUE if the transaction was deleted
+     */
+    static boolean deleteTransaction(byte[] id) {
+        if (id == null) {
+            return false;
+        }
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + DB_SCHEMA + ".transaction "
+                        + "WHERE bitcoin_txid=?")) {
+            stmt.setBytes(1, id);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to delete Bitcoin transaction from TokenExchange table", exc);
+        }
+        return count != 0;
+    }
 }

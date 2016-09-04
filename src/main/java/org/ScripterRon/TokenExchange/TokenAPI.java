@@ -168,7 +168,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     .stripTrailingZeros();
                 response.put("processed", TokenDb.setExchangeRate(rate));
                 break;
-            case "getTokens":
+            case "getNxtTransactions":
                 heightString = Convert.emptyToNull(req.getParameter("height"));
                 if (heightString == null) {
                     height = 0;
@@ -207,14 +207,13 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 });
                 response.put("tokens", tokenArray);
                 break;
-            case "deleteToken":
+            case "deleteNxtTransaction":
                 idString = Convert.emptyToNull(req.getParameter("id"));
                 if (idString == null) {
                     return missing("id");
                 }
                 long id = Long.parseUnsignedLong(idString);
-                boolean deleted = TokenDb.deleteToken(id);
-                response.put("deleted", deleted);
+                response.put("deleted", TokenDb.deleteToken(id));
                 break;
             case "suspend":
                 TokenAddon.suspend("Suspended by the TokenExchange administrator");
@@ -277,7 +276,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 }
                 response.put("accounts", accountArray);
                 break;
-            case "getTransactions":
+            case "getBitcoinTransactions":
                 JSONArray txArray = new JSONArray();
                 addressString = Convert.emptyToNull(req.getParameter("address"));
                 heightString = Convert.emptyToNull(req.getParameter("height"));
@@ -314,6 +313,14 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     txArray.add(txJSON);
                 });
                 response.put("transactions", txArray);
+                break;
+            case "deleteBitcoinTransaction":
+                idString = Convert.emptyToNull(req.getParameter("id"));
+                if (idString == null) {
+                    return missing("id");
+                }
+                byte[] txId = Convert.parseHexString(idString);
+                response.put("deleted", TokenDb.deleteTransaction(txId));
                 break;
             case "sendBitcoins" :
                 BitcoinWallet.propagateContext();
