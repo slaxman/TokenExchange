@@ -107,11 +107,6 @@ public class BitcoinWallet {
                 @Override
                 protected void onSetupCompleted() {
                     peerGroup().setUseLocalhostPeerWhenPossible(false);
-                    if (TokenAddon.bitcoinServer == null) {
-                        peerGroup.setMaxConnections(6);
-                    } else {
-                        peerGroup.setMaxConnections(1);
-                    }
                     wallet().allowSpendingUnconfirmedTransactions();
                     wallet().addChangeEventListener((eventWallet) -> {
                         propagateContext();
@@ -160,6 +155,11 @@ public class BitcoinWallet {
             Logger.logInfoMessage("Bitcoin wallet started");
             wallet = walletKit.wallet();
             peerGroup = walletKit.peerGroup();
+            if (TokenAddon.bitcoinServer == null) {
+                peerGroup.setMaxConnections(6);
+            } else {
+                peerGroup.setMaxConnections(1);
+            }
             //
             // Get the wallet address.  This is the address used to fund the wallet and
             // receive change from send requests.
