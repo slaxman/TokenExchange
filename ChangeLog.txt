@@ -3,6 +3,8 @@ TokenExchange Change Log
 
 Version 2.0.0
   - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
+  - Return suspend reason in GetStatus response
+  - Add SetExchangeRate, SendBitcoins and EmptyWallet API routines
   
 Version 1.3.0
   - Move TokenExchange tables to a separate schema to avoid conflicts
