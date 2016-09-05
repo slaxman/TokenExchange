@@ -1,7 +1,7 @@
 TokenExchange Change Log
 =========================
 
-Version 2.1.1
+Version 2.0.1
   - Rename DeleteToken to DeleteNxtTransaction (DeleteToken still accepted)
   - Add DeleteBitcoinTransaction
   - Rename GetTokens to GetNxtTransactions (GetTokens still accepted)
@@ -13,7 +13,7 @@ Version 2.1.1
 Version 2.0.0
   - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
   - Return suspend reason in GetStatus response
-  - Add SetExchangeRate, SendBitcoins and EmptyWallet API routines
+  - Add SetExchangeRate, SendBitcoins and EmptyWallet API
   
 Version 1.3.0
   - Move TokenExchange tables to a separate schema to avoid conflicts

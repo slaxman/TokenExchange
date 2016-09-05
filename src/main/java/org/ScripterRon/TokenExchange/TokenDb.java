@@ -399,7 +399,7 @@ public class TokenDb {
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + DB_SCHEMA + ".token "
                         + "(nxt_txid,sender,height,timestamp,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                        + "VALUES(?,?,?,false,?,?,?)")) {
+                        + "VALUES(?,?,?,?,false,?,?,?)")) {
             stmt.setLong(1, tx.getNxtTxId());
             stmt.setLong(2, tx.getSenderId());
             stmt.setInt(3, tx.getHeight());

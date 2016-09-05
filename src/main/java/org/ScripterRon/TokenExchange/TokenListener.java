@@ -62,6 +62,7 @@ public class TokenListener implements Runnable {
         blockchainProcessor.addListener((block) -> {
             try {
                 blockQueue.put(block.getId());
+                //Logger.logDebugMessage("Block pushed at height " + block.getHeight());
             } catch (InterruptedException exc) {
                 // Ignored since the queue is unbounded
             }
@@ -69,6 +70,7 @@ public class TokenListener implements Runnable {
         blockchainProcessor.addListener((block) -> {
             try {
                 blockQueue.put(block.getId());
+                //Logger.logDebugMessage("Block scanned at height " + block.getHeight());
             } catch (InterruptedException exc) {
                 // Ignored since the queue is unbounded
             }
