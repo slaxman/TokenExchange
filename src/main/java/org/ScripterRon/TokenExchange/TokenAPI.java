@@ -108,6 +108,9 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         if (function == null) {
             return missing("function");
         }
+        if (!BitcoinWallet.isWalletInitialized()) {
+            return failure("Bitcoin wallet is not initialized yet");
+        }
         String heightString;
         String idString;
         String includeExchangedString;
@@ -192,7 +195,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 JSONArray tokenArray = new JSONArray();
                 tokenList.forEach((token) -> {
                     JSONObject tokenObject = new JSONObject();
-                    tokenObject.put("id", Long.toUnsignedString(token.getNxtTxId()));
+                    tokenObject.put("nxtTxId", Long.toUnsignedString(token.getNxtTxId()));
                     tokenObject.put("sender", Long.toUnsignedString(token.getSenderId()));
                     tokenObject.put("senderRS", Convert.rsAccount(token.getSenderId()));
                     tokenObject.put("nxtChainHeight", token.getHeight());
@@ -208,7 +211,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     }
                     tokenArray.add(tokenObject);
                 });
-                response.put("tokens", tokenArray);
+                response.put("transactions", tokenArray);
                 break;
             case "deleteNxtTransaction":
             case "deleteToken":

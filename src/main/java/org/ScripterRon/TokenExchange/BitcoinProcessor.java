@@ -108,7 +108,7 @@ public class BitcoinProcessor implements Runnable {
         obtainLock();
         try {
             int height;
-            int timestamp;
+            int timestamp = Nxt.getEpochTime();
             if (TokenDb.transactionExists(hash.getBytes())) {
                 Logger.logDebugMessage("Bitcoin transaction " + hash + " already in database");
                 return;
@@ -119,12 +119,9 @@ public class BitcoinProcessor implements Runnable {
                 Date txDate = tx.getUpdateTime();
                 if (txDate != null) {
                     timestamp = Convert.toEpochTime(txDate.getTime());
-                } else {
-                    timestamp = Nxt.getEpochTime();
                 }
             } else if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.PENDING) {
                 height = 0;
-                timestamp = 0;
             } else {
                 Logger.logErrorMessage("Bitcoin transaction " + hash + " is not PENDING or BUILDING, "
                         + "transaction ignored");
@@ -228,7 +225,6 @@ public class BitcoinProcessor implements Runnable {
                     for (BitcoinTransaction tx : txList) {
                         String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
                         int txHeight = tx.getHeight();
-                        int txTimestamp = tx.getTimestamp();
                         if (txHeight == 0) {
                             Transaction btx = BitcoinWallet.getTransaction(bitcoinTxId);
                             if (btx == null) {
@@ -244,11 +240,11 @@ public class BitcoinProcessor implements Runnable {
                             tx.setHeight(txHeight);
                             Date txDate = btx.getUpdateTime();
                             if (txDate != null) {
-                                txTimestamp = Convert.toEpochTime(txDate.getTime());
-                            } else {
-                                txTimestamp = Nxt.getEpochTime();
+                                int txTimestamp = Convert.toEpochTime(txDate.getTime());
+                                if (txTimestamp < tx.getTimestamp()) {
+                                    tx.setTimestamp(txTimestamp);
+                                }
                             }
-                            tx.setTimestamp(txTimestamp);
                             if (!TokenDb.updateTransaction(tx)) {
                                 throw new RuntimeException("Unable to update transaction in TokenExchange database");
                             }

@@ -224,6 +224,15 @@ public class BitcoinWallet {
     }
 
     /**
+     * Check if the wallet is initialized
+     *
+     * @return                  TRUE if the wallet is initialized
+     */
+    static boolean isWalletInitialized() {
+        return walletInitialized;
+    }
+
+    /**
      * Get the current block chain height
      *
      * @return                  Block chain height
