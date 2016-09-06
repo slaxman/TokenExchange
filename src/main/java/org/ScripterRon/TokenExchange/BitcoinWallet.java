@@ -110,6 +110,14 @@ public class BitcoinWallet {
                 @Override
                 protected void onSetupCompleted() {
                     peerGroup().setUseLocalhostPeerWhenPossible(false);
+                    peerGroup().addConnectedEventListener((peer, count) ->
+                        Logger.logInfoMessage("Bitcoin peer "
+                                + peer.getAddress().getAddr().toString() + ":" + peer.getAddress().getPort()
+                                + " connected, peer count " + count));
+                    peerGroup().addDisconnectedEventListener((peer, count) ->
+                        Logger.logInfoMessage("Bitcoin peer "
+                                + peer.getAddress().getAddr().toString() + ":" + peer.getAddress().getPort()
+                                + " disconnected, peer count " + count));
                     wallet().allowSpendingUnconfirmedTransactions();
                     wallet().addChangeEventListener((eventWallet) -> {
                         propagateContext();

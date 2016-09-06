@@ -1,6 +1,10 @@
 TokenExchange Change Log
 =========================
 
+Version 2.0.2
+  - Check if wallet initialized before accepting API requests
+  - Log peer connect/disconnect
+
 Version 2.0.1
   - Rename DeleteToken to DeleteNxtTransaction (DeleteToken still accepted)
   - Add DeleteBitcoinTransaction
@@ -14,24 +18,4 @@ Version 2.0.0
   - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
   - Return suspend reason in GetStatus response
   - Add SetExchangeRate, SendBitcoins and EmptyWallet API
-  
-Version 1.3.0
-  - Move TokenExchange tables to a separate schema to avoid conflicts
-  - Null pointer exception if redemption account does not have currency
-  - Support encrypted messages in addition to plain messages
-  
-Version 1.2.0
-  - Add TokenExchange ssetExchangeRate API to modify the exchange rate
-  - HEIGHT column already defined when creating a new database
-  - Incorrect chain height stored in bitcoin transaction
-  - Begin SQL transaction before updating bitcoin block chain
-  
-Version 1.1.0
-  - TokenExchange no longer uses Bitcoin wallet notifications
-    - walletnotify.sh is no longer used
-    - TokenExchange TransactionReceived API removed
-  - Handle Bitcoin block chain reorganizations
-  - Handle wallet transactions received while TokenExchange was not running
-  
-Version 1.0.0
-  - Initial release
+
