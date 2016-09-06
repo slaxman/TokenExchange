@@ -4,6 +4,7 @@ TokenExchange Change Log
 Version 2.0.2
   - Check if wallet initialized before accepting API requests
   - Log peer connect/disconnect
+  - Bitcoin transaction processed immediately if received by wallet before block
 
 Version 2.0.1
   - Rename DeleteToken to DeleteNxtTransaction (DeleteToken still accepted)
