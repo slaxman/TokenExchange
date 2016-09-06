@@ -26,6 +26,7 @@ import nxt.util.Logger;
 
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.sql.SQLException;
 import java.util.Properties;
 
@@ -332,5 +333,33 @@ public class TokenAddon implements AddOn {
         suspended = false;
         suspendReason = null;
         Logger.logInfoMessage("TokenExchange processing resumed");
+    }
+
+    /**
+     * Format an address
+     *
+     * @param   address         INET address
+     * @param   port            Port
+     * @return                  Formatted string
+     */
+    static String formatAddress(InetAddress address, int port) {
+        String hostString = address.toString();
+        String hostName;
+        String hostAddress;
+        int index = hostString.indexOf("/");
+        if (index == 0) {
+            hostName = "";
+            hostAddress = hostString.substring(1);
+        } else if (index > 0) {
+            hostName = hostString.substring(0, index);
+            hostAddress = hostString.substring(index+1);
+        } else {
+            hostName = "";
+            hostAddress = hostString;
+        }
+        if (hostAddress.contains(":")) {
+            hostAddress = "[" + hostAddress + "]";
+        }
+        return (!hostName.isEmpty() ? hostName + "/" + hostAddress : hostAddress) + ":" + port;
     }
 }

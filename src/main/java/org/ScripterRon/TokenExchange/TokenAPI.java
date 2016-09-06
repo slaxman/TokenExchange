@@ -139,7 +139,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                     JSONObject JSONpeer = new JSONObject();
                     PeerAddress peerAddress = peer.getAddress();
                     VersionMessage versionMessage = peer.getPeerVersionMessage();
-                    JSONpeer.put("address", peerAddress.getAddr().toString() + ":" + peerAddress.getPort());
+                    JSONpeer.put("address", TokenAddon.formatAddress(peerAddress.getAddr(), peerAddress.getPort()));
                     JSONpeer.put("version", versionMessage.clientVersion);
                     JSONpeer.put("subVersion", versionMessage.subVer);
                     connectedPeers.add(JSONpeer);
