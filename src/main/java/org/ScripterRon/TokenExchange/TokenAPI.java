@@ -128,6 +128,8 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         switch (function) {
             case "getStatus":
                 BitcoinWallet.propagateContext();
+                response.put("applicationName", TokenAddon.applicationName);
+                response.put("applicationVersion", TokenAddon.applicationVersion);
                 response.put("exchangeRate", TokenAddon.exchangeRate.toPlainString());
                 response.put("currencyCode", TokenAddon.currencyCode);
                 response.put("currencyId", Long.toUnsignedString(TokenAddon.currencyId));

@@ -5,6 +5,7 @@ Version 2.0.2
   - Check if wallet initialized before accepting API requests
   - Log peer connect/disconnect
   - Bitcoin transaction processed immediately if received by wallet before block
+  - Return application name and version in GetStatus response
 
 Version 2.0.1
   - Rename DeleteToken to DeleteNxtTransaction (DeleteToken still accepted)
