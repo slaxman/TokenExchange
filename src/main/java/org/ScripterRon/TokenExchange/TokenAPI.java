@@ -432,7 +432,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
     @SuppressWarnings("unchecked")
     private static JSONStreamAware failure(String message) {
         JSONObject response = new JSONObject();
-        response.put("errorCode", 4);
+        response.put("errorCode", 6);
         response.put("errorDescription", message);
         return JSON.prepare(response);
     }
