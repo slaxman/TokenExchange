@@ -11,12 +11,10 @@ Version 2.0.1
   - Add DeleteBitcoinTransaction
   - Rename GetTokens to GetNxtTransactions (GetTokens still accepted)
   - Rename GetTransactions to GetBitcoinTransactions and add 'height' parameter (GetTransactions still accepted)
-  - Add timestamps to the transaction tables
   - Validate the supplied public key when obtaining a Bitcoin address
   - Change GetAddress to return a new address if the current address has been used
   
 Version 2.0.0
   - Use integrated Bitcoin SPV wallet instead of external Bitcoin server
-  - Return suspend reason in GetStatus response
   - Add SetExchangeRate, SendBitcoins and EmptyWallet API
 

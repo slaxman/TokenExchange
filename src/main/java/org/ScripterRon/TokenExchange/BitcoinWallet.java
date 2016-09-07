@@ -381,7 +381,7 @@ public class BitcoinWallet {
             Wallet.SendResult sendResult = wallet.sendCoins(sendRequest);
             tx = sendResult.tx;
         } catch (Wallet.DustySendRequested exc) {
-            throw new IllegalArgumentException("Send request to empty the wallet results in a dust output");
+            throw new IllegalArgumentException("Request to empty the wallet results in a dust output");
         } catch (InsufficientMoneyException exc) {
             throw new IllegalArgumentException("Insufficient funds available to empty the wallet");
         }

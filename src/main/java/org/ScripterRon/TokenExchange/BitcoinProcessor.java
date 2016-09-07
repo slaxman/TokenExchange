@@ -190,11 +190,6 @@ public class BitcoinProcessor implements Runnable {
         //
         // Initialize the Bitcoin wallet
         //
-        try {
-            Thread.sleep(30000);
-        } catch (InterruptedException exc) {
-            // Don't care
-        }
         if (!BitcoinWallet.init()) {
             TokenAddon.suspend("Unable to initialize the Bitcoin wallet");
             return;
