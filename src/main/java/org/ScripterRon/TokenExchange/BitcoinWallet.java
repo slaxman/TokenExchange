@@ -109,7 +109,6 @@ public class BitcoinWallet {
             walletKit = new WalletAppKit(context, walletDirectory, "wallet") {
                 @Override
                 protected void onSetupCompleted() {
-                    peerGroup().setUseLocalhostPeerWhenPossible(false);
                     peerGroup().addConnectedEventListener((peer, count) ->
                         Logger.logInfoMessage("Bitcoin peer "
                                 + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
