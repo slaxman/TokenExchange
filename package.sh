@@ -11,6 +11,10 @@ fi
 
 VERSION="$1"
 
+if [ ! -d package ] ; then
+  mkdir package
+fi
+
 cd package
 rm -R *
 mkdir -p addons/lib TokenExchange
