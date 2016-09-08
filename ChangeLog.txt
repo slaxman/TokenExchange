@@ -1,6 +1,9 @@
 TokenExchange Change Log
 =========================
 
+Version 2.0.3
+  - Shutdown wallet when stopping TokenExchange
+
 Version 2.0.2
   - Check if wallet initialized before accepting API requests
   - Log peer connect/disconnect

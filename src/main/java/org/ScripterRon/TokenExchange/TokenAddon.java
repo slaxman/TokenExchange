@@ -273,6 +273,7 @@ public class TokenAddon implements AddOn {
     public void shutdown() {
         TokenListener.shutdown();
         BitcoinProcessor.shutdown();
+        BitcoinWallet.shutdown();
         initialized = false;
         Logger.logInfoMessage("TokenExchange shutdown");
     }
