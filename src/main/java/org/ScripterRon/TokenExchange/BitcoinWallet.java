@@ -32,10 +32,12 @@ import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.WrongNetworkException;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.params.MainNetParams;
+import org.bitcoinj.utils.Threading;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -49,11 +51,17 @@ import org.bitcoinj.core.Sha256Hash;
  */
 public class BitcoinWallet {
 
+    /** Maximum number of peer connections */
+    private static final int MAX_CONNECTIONS = 6;
+
     /** Wallet initialized */
     private static volatile boolean walletInitialized = false;
 
     /** Wallet context */
     private static Context context;
+
+    /** Wallet directory */
+    private static File walletDirectory;
 
     /** Wallet kit */
     private static WalletAppKit walletKit;
@@ -66,6 +74,9 @@ public class BitcoinWallet {
 
     /** Wallet address */
     private static String walletAddress;
+
+    /** Peer message listener */
+    private static final BitcoinDiscovery peerDiscovery = new BitcoinDiscovery();
 
     /**
      * Initialize the Bitcoin wallet
@@ -94,7 +105,7 @@ public class BitcoinWallet {
         int index1 = dbPath.lastIndexOf('/');
         int index2 = dbPath.lastIndexOf('\\');
         dbPath = dbPath.substring(0, Math.max(index1, index2));
-        File walletDirectory = new File(dbPath, "TokenExchange");
+        walletDirectory = new File(dbPath, "TokenExchange");
         Logger.logInfoMessage("TokenExchange wallet files stored in " + walletDirectory.toString());
         //
         // Get the wallet context
@@ -102,13 +113,18 @@ public class BitcoinWallet {
         Coin txFee = Coin.valueOf(TokenAddon.bitcoinTxFee.movePointRight(8).longValue());
         NetworkParameters params = MainNetParams.get();
         context = new Context(params, 100, txFee, false);
-        //
-        // Create the wallet
-        //
         try {
+            //
+            // Load the saved peers
+            //
+            int peerCount = peerDiscovery.loadPeers();
+            //
+            // Create the wallet
+            //
             walletKit = new WalletAppKit(context, walletDirectory, "wallet") {
                 @Override
                 protected void onSetupCompleted() {
+                    peerGroup().setUseLocalhostPeerWhenPossible(false);
                     peerGroup().addConnectedEventListener((peer, count) ->
                         Logger.logInfoMessage("Bitcoin peer "
                                 + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
@@ -117,6 +133,7 @@ public class BitcoinWallet {
                         Logger.logInfoMessage("Bitcoin peer "
                                 + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
                                 + " disconnected, peer count " + count));
+                    peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, peerDiscovery);
                     wallet().allowSpendingUnconfirmedTransactions();
                     wallet().addChangeEventListener((eventWallet) -> {
                         propagateContext();
@@ -138,7 +155,8 @@ public class BitcoinWallet {
             walletKit.setBlockingStartup(false);
             //
             // Use a single Bitcoin server if the 'bitcoinServer' configuration option is specified.
-            // Otherwise, we will select 4 servers from the DNS discovery peers.
+            // Otherwise, we will select servers using either peer discovery (if we have enough peers)
+            // or DNS discovery.
             //
             if (TokenAddon.bitcoinServer != null) {
                 String[] addressParts = TokenAddon.bitcoinServer.split(":");
@@ -154,7 +172,10 @@ public class BitcoinWallet {
                     walletKit.setPeerNodes(new PeerAddress(params, inetAddress, port));
                 } catch (UnknownHostException exc) {
                     Logger.logErrorMessage("Unable to resolve Bitcoin server address '" + host + "'", exc);
+                    TokenAddon.bitcoinServer = null;
                 }
+            } else if (peerCount >= 5 * MAX_CONNECTIONS) {
+                walletKit.setDiscovery(peerDiscovery);
             }
             //
             // Start the wallet and wait until it is up and running
@@ -166,7 +187,7 @@ public class BitcoinWallet {
             wallet = walletKit.wallet();
             peerGroup = walletKit.peerGroup();
             if (TokenAddon.bitcoinServer == null) {
-                peerGroup.setMaxConnections(6);
+                peerGroup.setMaxConnections(MAX_CONNECTIONS);
             } else {
                 peerGroup.setMaxConnections(1);
             }
@@ -202,11 +223,12 @@ public class BitcoinWallet {
      */
     static void shutdown() {
         if (walletInitialized) {
-            walletKit.stopAsync();
             try {
-                Logger.logInfoMessage("Waiting for Bitcoin wallet to stop ...");
+                walletKit.stopAsync();
+                peerDiscovery.storePeers();
                 walletKit.awaitTerminated(5000, TimeUnit.MILLISECONDS);
-                Logger.logInfoMessage("Bitcoin wallet has stopped");
+            } catch (IOException exc) {
+                Logger.logErrorMessage("Unable to save TokenExchange peers", exc);
             } catch (TimeoutException exc) {
                 // Ignored
             }
@@ -219,6 +241,15 @@ public class BitcoinWallet {
      */
     static void propagateContext() {
         Context.propagate(context);
+    }
+
+    /**
+     * Get the wallet directory
+     *
+     * @return                  Wallet directory
+     */
+    static File getWalletDirectory() {
+        return walletDirectory;
     }
 
     /**
