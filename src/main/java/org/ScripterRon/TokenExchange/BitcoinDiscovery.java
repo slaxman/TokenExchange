@@ -23,7 +23,9 @@ import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
 import org.bitcoinj.core.listeners.PreMessageReceivedEventListener;
+import org.bitcoinj.net.discovery.DnsDiscovery;
 import org.bitcoinj.net.discovery.PeerDiscovery;
+import org.bitcoinj.net.discovery.PeerDiscoveryException;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -51,6 +53,12 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
 
     /** Peer address map */
     private final Map<InetSocketAddress, PeerAddress> peerMap = new HashMap<>();
+
+    /** Peer discovery map */
+    private final Map<InetSocketAddress, InetSocketAddress> discoveryMap = new HashMap<>();
+
+    /** DNS discovery */
+    private DnsDiscovery dnsDiscovery;
 
     /**
      * Process a received message
@@ -181,19 +189,50 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
     /**
      * Provide a list of acceptable peers (PeerDiscovery interface)
      *
-     * @param   services        Bit mask of required services
-     * @param   timeout         Discovery timeout
-     * @param   timeUnit        Time unit
-     * @return                  Array of addresses
+     * @param   services                Bit mask of required services
+     * @param   timeout                 Discovery timeout
+     * @param   timeUnit                Time unit
+     * @return                          Array of addresses
+     * @throws  PeerDiscoveryException  Error during peer discovery
      */
     @Override
-    public InetSocketAddress[] getPeers(long services, long timeout, TimeUnit timeUnit) {
+    public InetSocketAddress[] getPeers(long services, long timeout, TimeUnit timeUnit)
+                                        throws PeerDiscoveryException {
         InetSocketAddress[] peers;
+        //
+        // Return any new peers discovered through ADDR messages
+        //
         synchronized(peerAddresses) {
             peers = peerAddresses.stream()
-                    .filter((addr) -> (addr.getServices().longValue() & services) == services)
-                    .map((addr) -> addr.getSocketAddress())
-                    .toArray(InetSocketAddress[]::new);
+                .filter((addr) -> {
+                        InetSocketAddress socketAddr = addr.getSocketAddress();
+                        if ((addr.getServices().longValue() & services) == services &&
+                                discoveryMap.get(socketAddr) == null) {
+                            discoveryMap.put(socketAddr, socketAddr);
+                            return true;
+                        }
+                        return false;
+                    })
+                .map((addr) -> addr.getSocketAddress())
+                .toArray(InetSocketAddress[]::new);
+            Logger.logDebugMessage("Returning " + peers.length + " peers from ADDR discovery");
+        }
+        //
+        // Get peers from the DNS seeds if we have returned all of our peers
+        //
+        if (peers.length == 0) {
+            if (dnsDiscovery == null) {
+                dnsDiscovery = new DnsDiscovery(BitcoinWallet.getNetworkParameters());
+            }
+            peers = dnsDiscovery.getPeers(services, timeout, timeUnit);
+            if (peers != null) {
+                synchronized(peerAddresses) {
+                    for (InetSocketAddress addr : peers) {
+                        discoveryMap.put(addr, addr);
+                    }
+                }
+                Logger.logDebugMessage("Returning " + peers.length + " peers from DNS discovery");
+            }
         }
         return peers;
     }
