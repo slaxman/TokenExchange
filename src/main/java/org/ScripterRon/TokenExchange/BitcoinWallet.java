@@ -155,8 +155,7 @@ public class BitcoinWallet {
             walletKit.setBlockingStartup(false);
             //
             // Use a single Bitcoin server if the 'bitcoinServer' configuration option is specified.
-            // Otherwise, we will select servers using either peer discovery (if we have enough peers)
-            // or DNS discovery.
+            // Otherwise, we will select servers using peer discovery.
             //
             if (TokenAddon.bitcoinServer != null) {
                 String[] addressParts = TokenAddon.bitcoinServer.split(":");
@@ -174,7 +173,7 @@ public class BitcoinWallet {
                     Logger.logErrorMessage("Unable to resolve Bitcoin server address '" + host + "'", exc);
                     TokenAddon.bitcoinServer = null;
                 }
-            } else if (peerCount >= 5 * MAX_CONNECTIONS) {
+            } else {
                 walletKit.setDiscovery(peerDiscovery);
             }
             //

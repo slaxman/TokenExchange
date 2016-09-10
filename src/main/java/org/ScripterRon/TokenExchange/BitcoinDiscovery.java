@@ -48,6 +48,13 @@ import java.util.concurrent.TimeUnit;
  */
 public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventListener {
 
+    /** A services flag that denotes whether the peer has a copy of the block chain */
+    static final long NODE_NETWORK = 1;
+    /** A flag that denotes whether the peer supports the getutxos message */
+    static final long NODE_GETUTXOS = 2;
+    /** A flag that denotes whether the peer supports Bloom filters */
+    static final long NODE_BLOOM = 4;
+
     /** Peer address list */
     private final List<PeerAddress> peerAddresses = new ArrayList<>();
 
@@ -78,18 +85,20 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
             NetworkParameters networkParams = BitcoinWallet.getNetworkParameters();
             synchronized(peerAddresses) {
                 peerAddrs.forEach((peerAddr) -> {
-                    InetSocketAddress socketAddr = peerAddr.getSocketAddress();
-                    if (!socketAddr.getAddress().isLoopbackAddress()) {
-                        PeerAddress addr = peerMap.get(socketAddr);
-                        if (addr == null) {
-                            addr = new PeerAddress(networkParams, peerAddr.getAddr(), peerAddr.getPort());
-                            peerAddresses.add(addr);
-                            peerMap.put(socketAddr, addr);
-                            Logger.logDebugMessage("Added TokenExchange peer "
-                                    + addr.getAddr().toString() + ":" + addr.getPort());
+                    if ((peerAddr.getServices().longValue() & NODE_BLOOM) != 0) {
+                        InetSocketAddress socketAddr = peerAddr.getSocketAddress();
+                        if (!socketAddr.getAddress().isLoopbackAddress()) {
+                            PeerAddress addr = peerMap.get(socketAddr);
+                            if (addr == null) {
+                                addr = new PeerAddress(networkParams, peerAddr.getAddr(), peerAddr.getPort());
+                                peerAddresses.add(addr);
+                                peerMap.put(socketAddr, addr);
+                                Logger.logDebugMessage("Added TokenExchange peer "
+                                        + addr.getAddr().toString() + ":" + addr.getPort());
+                            }
+                            addr.setTime(peerAddr.getTime());
+                            addr.setServices(peerAddr.getServices());
                         }
-                        addr.setTime(peerAddr.getTime());
-                        addr.setServices(peerAddr.getServices());
                     }
                 });
             }
@@ -187,7 +196,7 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
     }
 
     /**
-     * Provide a list of acceptable peers (PeerDiscovery interface)
+     * Provide a list of peers that support Bloom filters (PeerDiscovery interface)
      *
      * @param   services                Bit mask of required services
      * @param   timeout                 Discovery timeout
@@ -206,8 +215,8 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
             peers = peerAddresses.stream()
                 .filter((addr) -> {
                         InetSocketAddress socketAddr = addr.getSocketAddress();
-                        if ((addr.getServices().longValue() & services) == services &&
-                                discoveryMap.get(socketAddr) == null) {
+                        if ((addr.getServices().longValue() & NODE_BLOOM) == NODE_BLOOM &&
+                                    discoveryMap.get(socketAddr) == null) {
                             discoveryMap.put(socketAddr, socketAddr);
                             return true;
                         }
@@ -218,13 +227,14 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
             Logger.logDebugMessage("Returning " + peers.length + " peers from ADDR discovery");
         }
         //
-        // Get peers from the DNS seeds if we have returned all of our peers
+        // Get peers from the DNS seeds if we have returned all of our peers (note that
+        // DNS discovery cannot filter by service)
         //
         if (peers.length == 0) {
             if (dnsDiscovery == null) {
                 dnsDiscovery = new DnsDiscovery(BitcoinWallet.getNetworkParameters());
             }
-            peers = dnsDiscovery.getPeers(services, timeout, timeUnit);
+            peers = dnsDiscovery.getPeers(0, timeout, timeUnit);
             if (peers != null) {
                 synchronized(peerAddresses) {
                     for (InetSocketAddress addr : peers) {
