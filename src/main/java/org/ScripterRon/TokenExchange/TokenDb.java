@@ -709,7 +709,7 @@ public class TokenDb {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE exchanged=false AND height>0 AND height<=? ORDER BY height ASC")) {
+                        + "WHERE exchanged=false AND height<=? ORDER BY height ASC")) {
             stmt.setInt(1, height);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
