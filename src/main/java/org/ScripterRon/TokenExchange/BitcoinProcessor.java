@@ -243,6 +243,9 @@ public class BitcoinProcessor implements Runnable {
                             if (!TokenDb.updateTransaction(tx)) {
                                 throw new RuntimeException("Unable to update transaction in TokenExchange database");
                             }
+                            if (txHeight > lastSeenHeight - TokenAddon.bitcoinConfirmations) {
+                                continue;
+                            }
                         }
                         long units = tx.getTokenAmount();
                         if (units > unitBalance) {
