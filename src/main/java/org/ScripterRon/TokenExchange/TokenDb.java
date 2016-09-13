@@ -16,11 +16,20 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Db;
-import nxt.Nxt;
 import nxt.db.DerivedDbTable;
 import nxt.util.Logger;
 
+import org.bitcoinj.core.Context;
+import org.bitcoinj.core.ProtocolException;
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionConfidence;
+import org.bitcoinj.crypto.ChildNumber;
+import org.bitcoinj.wallet.DeterministicSeed;
+
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.Charset;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -35,48 +44,101 @@ import java.util.List;
  */
 public class TokenDb {
 
+    /** UTF-8 character set */
+    private static Charset UTF_8;
+    static {
+        try {
+            UTF_8 = Charset.forName("UTF-8");
+        } catch (Exception exc) {
+            // UTF-8 is always defined
+        }
+    }
+
     /** Database schema name */
-    private static final String DB_SCHEMA = "TOKEN_EXCHANGE_2";
+    private static final String DB_SCHEMA = "TOKEN_EXCHANGE_3";
+
+    /** Control table name */
+    private static final String CONTROL_TABLE = DB_SCHEMA + ".control";
+
+    /** Account table name */
+    private static final String ACCOUNT_TABLE = DB_SCHEMA + ".account";
+
+    /** Unspent table name */
+    private static final String UNSPENT_TABLE = DB_SCHEMA + ".unspent";
+
+    /** Broadcast table name */
+    private static final String BROADCAST_TABLE = DB_SCHEMA + ".broadcast";
+
+    /** Nxt transaction table name */
+    private static final String NXT_TABLE = DB_SCHEMA + ".nxt";
+
+    /** Bitcoin transaction table name */
+    private static final String BITCOIN_TABLE = DB_SCHEMA + ".bitcoin";
 
     /** Current database version */
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 1;
 
     /** Schema definition */
     private static final String schemaDefinition = "CREATE SCHEMA IF NOT EXISTS " + DB_SCHEMA;
 
-    /** Nxt token table definitions */
-    private static final String tokenTableDefinition = "CREATE TABLE IF NOT EXISTS " + DB_SCHEMA + ".token ("
-            + "db_id IDENTITY,"
+    /** Control table definitions */
+    private static final String controlTableDefinition = "CREATE TABLE IF NOT EXISTS " + CONTROL_TABLE  + " ("
+            + "db_version INT NOT NULL,"            // Database version
+            + "creation_time LONG NOT NULL,"        // Database creation time (seconds since Unix epoch)
+            + "seed BINARY NOT NULL,"               // Encoded deterministic seed
+            + "exchange_rate BIGINT NOT NULL,"      // Exchange rate
+            + "wallet_key INT NOT NULL,"            // Wallet key identifier
+            + "external_key INT NOT NULL,"          // Next external key identifier
+            + "internal_key INT NOT NULL)";         // Next internal key identifier
+
+    /** Account table definitions */
+    private static final String accountTableDefinition = "CREATE TABLE IF NOT EXISTS " + ACCOUNT_TABLE + " ("
+            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
+            + "child_number INT NOT NULL,"          // External key child number
+            + "account_id BIGINT NOT NULL,"         // Nxt account identifier
+            + "public_key BINARY(32),"              // Nxt account public key
+            + "timestamp INT NOT NULL)";            // Timestamp
+    private static final String accountIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    + ACCOUNT_TABLE + "_idx1 ON " + ACCOUNT_TABLE + "(bitcoin_address)";
+    private static final String accountIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
+                    + ACCOUNT_TABLE + "_idx2 ON " + ACCOUNT_TABLE + "(account_id)";
+
+    /** Transaction broadcast table definitions */
+    private static final String broadcastTableDefinition = "CREATE TABLE IF NOT EXISTS " + BROADCAST_TABLE + " ("
+            + "txid BINARY(32) NOT NULL,"           // Transaction identifier
+            + "payload BINARY NOT NULL)";           // Transaction payload
+
+    /** Unspent Bitcoin transaction outputs */
+    private static final String unspentTableDefinition = "CREATE TABLE IF NOT EXISTS " + UNSPENT_TABLE + " ("
+            + "txid BINARY(32) NOT NULL,"           // Transaction identifier
+            + "index INT NOT NULL,"                 // Output index
+            + "amount BIGINT NOT NULL,"             // Bitcoin amount
+            + "child_number INT NOT NULL,"          // Determinstic key child number
+            + "parent_number INT NOT NULL,"         // Deterministic key parent number
+            + "height INT NOT NULL)";               // Block chain height
+    private static final String unspentIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    + UNSPENT_TABLE + "_idx1 ON " + UNSPENT_TABLE + "(txid,index)";
+
+    /** Nxt transaction table definitions */
+    private static final String nxtTableDefinition = "CREATE TABLE IF NOT EXISTS " + NXT_TABLE + " ("
             + "nxt_txid BIGINT NOT NULL,"           // Nxt transaction identifier
             + "sender BIGINT NOT NULL,"             // Nxt transaction sender identifier
             + "height INT NOT NULL,"                // Nxt transaction height
             + "timestamp INT NOT NULL,"             // Nxt transaction timestamp
             + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency exchanged for Bitcoin
             + "token_amount BIGINT NOT NULL,"       // Number of units redeemed / Database version
-            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount / Current exchange rate
-            + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address / Wallet bitcoin address
-            + "bitcoin_txid BINARY(32))";           // Bitcoin transaction identifier
-    private static final String tokenIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS " + DB_SCHEMA + ".token_idx1 "
-            + "ON " + DB_SCHEMA + ".token(nxt_txid)";
-    private static final String tokenIndexDefinition2 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".token_idx2 "
-            + "ON " + DB_SCHEMA + ".token(exchanged)";
-    private static final String tokenIndexDefinition3 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".token_idx3 "
-            + "ON " + DB_SCHEMA + ".token(height)";
-
-    /** Bitcoin address table definitions */
-    private static final String accountTableDefinition = "CREATE TABLE IF NOT EXISTS " + DB_SCHEMA + ".account ("
-            + "db_id IDENTITY,"
+            + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
-            + "account_id BIGINT NOT NULL,"         // Nxt account identifier
-            + "public_key BINARY(32))";             // Nxt account public key
-    private static final String accountIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS " + DB_SCHEMA + ".account_idx1 "
-            + "ON " + DB_SCHEMA + ".account(bitcoin_address)";
-    private static final String accountIndexDefinition2 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".account_idx2 "
-            + "ON " + DB_SCHEMA + ".account(account_id)";
+            + "bitcoin_txid BINARY(32))";           // Bitcoin transaction identifier
+    private static final String nxtIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    + NXT_TABLE + "_idx1 ON " + NXT_TABLE + "(nxt_txid)";
+    private static final String nxtIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
+                    + NXT_TABLE + "_idx2 ON " + NXT_TABLE + "(exchanged)";
+    private static final String nxtIndexDefinition3 = "CREATE INDEX IF NOT EXISTS "
+                    + NXT_TABLE + "_idx3 ON " + NXT_TABLE + "(height)";
 
     /** Bitcoin transaction table definitions */
-    private static final String transactionTableDefinition = "CREATE TABLE IF NOT EXISTS " + DB_SCHEMA + ".transaction ("
-            + "db_id IDENTITY,"
+    private static final String bitcoinTableDefinition = "CREATE TABLE IF NOT EXISTS " + BITCOIN_TABLE + " ("
             + "height INT NOT NULL,"                // Bitcoin block chain height (0 if not in chain yet)
             + "timestamp INT NOT NULL,"             // Bitcoin transaction timestamp (0 if not in chain yet)
             + "bitcoin_txid BINARY(32) NOT NULL,"   // Bitcoin transaction identifier
@@ -86,15 +148,15 @@ public class TokenDb {
             + "token_amount BIGINT NOT NULL,"       // Number of units issued
             + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency has been issued
             + "nxt_txid BIGINT NOT NULL)";          // Nxt transaction identifier
-    private static final String transactionIndexDefinition1 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".transaction_idx1 "
-            + "ON " + DB_SCHEMA + ".transaction(bitcoin_txid)";
-    private static final String transactionIndexDefinition2 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".transaction_idx2 "
-            + "ON " + DB_SCHEMA + ".transaction(exchanged)";
-    private static final String transactionIndexDefinition3 = "CREATE INDEX IF NOT EXISTS " + DB_SCHEMA + ".transaction_idx3 "
-            + "ON " + DB_SCHEMA + ".transaction(height)";
+    private static final String bitcoinIndexDefinition1 = "CREATE INDEX IF NOT EXISTS "
+                    + BITCOIN_TABLE + "_idx1 ON " + BITCOIN_TABLE + "(bitcoin_txid)";
+    private static final String bitcoinIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
+                    + BITCOIN_TABLE + "_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
+    private static final String bitcoinIndexDefinition3 = "CREATE INDEX IF NOT EXISTS "
+                    + BITCOIN_TABLE + "_idx3 ON " + BITCOIN_TABLE + "(height)";
 
     /**
-     * Token table
+     * Nxt transaction table
      *
      * A DerivedDbTable provides rollback() and truncate() methods which
      * a called by the block chain processor when blocks are popped off.
@@ -153,15 +215,10 @@ public class TokenDb {
     /**
      * Initialize the database support
      *
-     * We use the nxt_txid=0 row in the token_exchange table to save status information:
-     *   - token_amount is the database version
-     *   - bitcoin_amount is the current token exchange rate
-     *   - bitcoin_address contains descriptive text
-     *
      * @throws  SQLException    SQL error occurred
      */
     static void init() throws SQLException {
-        tokenTable = new TokenExchangeTable(DB_SCHEMA + ".token");
+        tokenTable = new TokenExchangeTable(NXT_TABLE);
         try (Connection conn = Db.db.getConnection();
                 Statement stmt = conn.createStatement()) {
             //
@@ -169,11 +226,11 @@ public class TokenDb {
             //
             int version = 0;
             try {
-                try (ResultSet rs = stmt.executeQuery("SELECT token_amount FROM " + DB_SCHEMA + ".token WHERE nxt_txid=0")) {
+                try (ResultSet rs = stmt.executeQuery("SELECT db_version FROM " + CONTROL_TABLE)) {
                     if (rs.next()) {
-                        version = rs.getInt("token_amount");
+                        version = rs.getInt("db_version");
                         if (version > DB_VERSION) {
-                            throw new RuntimeException("Version " + version + " TokenExchange database is not supported");
+                            throw new IllegalStateException("Version " + version + " TokenExchange database is not supported");
                         }
                     }
                 }
@@ -184,48 +241,38 @@ public class TokenDb {
                 case 0:
                     Logger.logInfoMessage("Creating new TokenExchange database");
                     stmt.execute(schemaDefinition);
-                    stmt.execute(tokenTableDefinition);
-                    stmt.execute(tokenIndexDefinition1);
-                    stmt.execute(tokenIndexDefinition2);
-                    stmt.executeUpdate("INSERT INTO " + DB_SCHEMA + ".token "
-                        + "(nxt_txid,sender,height,timestamp,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                        + "VALUES(0,0,0,0,false,1,"
-                        + TokenAddon.exchangeRate.movePointRight(8).toPlainString()
-                        + ",'')");
+                    stmt.execute(controlTableDefinition);
+                    stmt.executeUpdate("INSERT INTO " + CONTROL_TABLE
+                        + " (db_version,creation_time,seed,exchange_rate,wallet_key,external_key,internal_key)"
+                        + " VALUES(1," + System.currentTimeMillis()/1000 + ",x'0000',"
+                        + TokenAddon.exchangeRate.movePointRight(8).toPlainString() + ",0,1,0)");
+                    stmt.execute(unspentTableDefinition);
+                    stmt.execute(unspentIndexDefinition1);
+                    stmt.execute(broadcastTableDefinition);
                     stmt.execute(accountTableDefinition);
                     stmt.execute(accountIndexDefinition1);
                     stmt.execute(accountIndexDefinition2);
-                    stmt.execute(transactionTableDefinition);
-                    stmt.execute(transactionIndexDefinition1);
-                    stmt.execute(transactionIndexDefinition2);
-                case 1:
-                    if (version == 1) {
-                        int timestamp = Nxt.getEpochTime();
-                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".token ADD COLUMN IF NOT EXISTS "
-                                + "timestamp INT AFTER height");
-                        stmt.execute("UPDATE " + DB_SCHEMA + ".token SET timestamp=" + timestamp);
-                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".token ALTER COLUMN timestamp SET NOT NULL");
-                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".transaction ADD COLUMN IF NOT EXISTS "
-                                + "timestamp INT AFTER height");
-                        stmt.execute("UPDATE " + DB_SCHEMA + ".transaction SET timestamp=" + timestamp);
-                        stmt.execute("ALTER TABLE " + DB_SCHEMA + ".transaction ALTER COLUMN timestamp SET NOT NULL");
-                        stmt.execute("DROP INDEX " + DB_SCHEMA + ".account_idx2");
-                        stmt.execute(accountIndexDefinition2);
-                    }
-                    stmt.execute(tokenIndexDefinition3);
-                    stmt.execute(transactionIndexDefinition3);
+                    stmt.execute(nxtTableDefinition);
+                    stmt.execute(nxtIndexDefinition1);
+                    stmt.execute(nxtIndexDefinition2);
+                    stmt.execute(nxtIndexDefinition3);
+                    stmt.execute(bitcoinTableDefinition);
+                    stmt.execute(bitcoinIndexDefinition1);
+                    stmt.execute(bitcoinIndexDefinition2);
+                    stmt.execute(bitcoinIndexDefinition3);
+                    //
                     // Add new database version processing here
-                    stmt.executeUpdate("UPDATE " + DB_SCHEMA + ".token SET token_amount=" + DB_VERSION + " WHERE nxt_txid=0");
+                    //
+                    stmt.executeUpdate("UPDATE " + CONTROL_TABLE + " SET db_version=" + DB_VERSION);
                 default:
                     Logger.logInfoMessage("Using Version " + DB_VERSION + " TokenExchange database");
             }
             //
             // Get the current token exchange rate
             //
-            try (ResultSet rs = stmt.executeQuery("SELECT bitcoin_amount FROM "
-                        + DB_SCHEMA + ".token WHERE nxt_txid=0")) {
+            try (ResultSet rs = stmt.executeQuery("SELECT exchange_rate FROM " + CONTROL_TABLE)) {
                 if (rs.next()) {
-                    long exchangeRate = rs.getLong("bitcoin_amount");
+                    long exchangeRate = rs.getLong("exchange_rate");
                     if (exchangeRate != 0) {
                         TokenAddon.exchangeRate = BigDecimal.valueOf(exchangeRate, 8).stripTrailingZeros();
                     }
@@ -235,43 +282,144 @@ public class TokenDb {
     }
 
     /**
-     * Get the wallet address
+     * Get the database creation time
      *
-     * @return                  Wallet address or null
+     * @return                  Database creation time (seconds since Unix epoch)
      */
-    static String getWalletAddress() {
-        String address = null;
+    static long getCreationTime() {
+        long creationTime = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT bitcoin_address FROM "
-                        + DB_SCHEMA + ".token WHERE nxt_txid=0")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT creation_time FROM " + CONTROL_TABLE)) {
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    address = rs.getString("bitcoin_address");
+                    creationTime = rs.getLong("creation_time");
                 }
             }
         } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get wallet address from TokenExchange table", exc);
+            Logger.logErrorMessage("Unable to get creation time from TokenExchange table", exc);
         }
-        return address;
+        return creationTime;
     }
 
     /**
-     * Set the wallet address
+     * Store the deterministic key seed
      *
-     * @param   address         Wallet address
-     * @return                  TRUE if the wallet address was set
+     * @param   seed            Deterministic key seed
      */
-    static boolean setWalletAddress(String address) {
+    static boolean storeSeed(DeterministicSeed seed) {
         int count = 0;
+        //
+        // Encode the deterministic seed
+        //
+        byte[] seedBytes = seed.getSeedBytes();
+        List<String> codes = seed.getMnemonicCode();
+        if (seedBytes == null || codes == null) {
+            throw new IllegalArgumentException("Deterministic seed is not valid");
+        }
+        long creationTime = seed.getCreationTimeSeconds();
+        int codeLength = 2;
+        byte[][] codeBytes = new byte[codes.size()][];
+        int index = 0;
+        for (String code : codes) {
+            codeBytes[index] = code.getBytes(UTF_8);
+            codeLength += 2 + codeBytes[index].length;
+            index++;
+        }
+        int length = 2 + seedBytes.length + codeLength + 8;
+        byte[] encodedSeed = new byte[length];
+        ByteBuffer buf = ByteBuffer.wrap(encodedSeed);
+        buf.order(ByteOrder.LITTLE_ENDIAN);
+        buf.putShort((short)seedBytes.length).put(seedBytes).putShort((short)codes.size());
+        for (byte[] bytes : codeBytes) {
+            buf.putShort((short)bytes.length).put(bytes);
+        }
+        buf.putLong(creationTime);
+        //
+        // Store the encoded seed
+        //
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("UPDATE " + DB_SCHEMA + ".token "
-                        + "SET bitcoin_address=? WHERE nxt_txid=0")) {
-            stmt.setString(1, address);
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET seed=?")) {
+            stmt.setBytes(1, encodedSeed);
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to set wallet address in TokenExchange table", exc);
+            Logger.logErrorMessage("Unable to store deterministic seed in TokenExchange table", exc);
         }
         return count != 0;
+    }
+
+    /**
+     * Get the deterministic seed
+     *
+     * @return                  Deterministic seed or null
+     */
+    static DeterministicSeed getSeed() {
+        DeterministicSeed seed = null;
+        byte[] encodedSeed = null;
+        //
+        // Get the encoded seed
+        //
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT seed FROM " + CONTROL_TABLE)) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    encodedSeed = rs.getBytes("seed");
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get deterministic seed from TokenExchange table", exc);
+        }
+        //
+        // Decode the seed
+        //
+        if (encodedSeed != null && encodedSeed.length > 2) {
+            ByteBuffer buf = ByteBuffer.wrap(encodedSeed);
+            buf.order(ByteOrder.LITTLE_ENDIAN);
+            try {
+                int length = buf.getShort();
+                byte[] seedBytes = new byte[length];
+                buf.get(seedBytes);
+                int count = buf.getShort();
+                List<String> codes = new ArrayList<>(count);
+                for (int i=0; i<count; i++) {
+                    length = buf.getShort();
+                    byte[] bytes = new byte[length];
+                    buf.get(bytes);
+                    codes.add(new String(bytes, UTF_8));
+                }
+                long creationTime = buf.getLong();
+                seed = new DeterministicSeed(seedBytes, codes, creationTime);
+            } catch (IndexOutOfBoundsException exc) {
+                Logger.logErrorMessage("Encoded seed is not valid", exc);
+            }
+        }
+        return seed;
+    }
+
+    /**
+     * Get the next child for the specified parent
+     *
+     * @param   parent          Parent (0 = external, 1 = internal)
+     * @return                  Next child or null
+     */
+    static ChildNumber getNewChild(ChildNumber parent) {
+        ChildNumber child = null;
+        String column = (parent.getI() == 0 ? "external_key" : "internal_key");
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt1 = conn.prepareStatement("SELECT " + column + " FROM " + CONTROL_TABLE);
+                PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET " + column + "=?")) {
+            try (ResultSet rs = stmt1.executeQuery()) {
+                if (rs.next()) {
+                    child = new ChildNumber(rs.getInt(column));
+                }
+            }
+            if (child != null) {
+                stmt2.setInt(1, child.getI() + 1);
+                stmt2.executeUpdate();
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to update child number in TokenExchange table", exc);
+        }
+        return child;
     }
 
     /**
@@ -283,8 +431,7 @@ public class TokenDb {
     static boolean setExchangeRate(BigDecimal rate) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("UPDATE " + DB_SCHEMA + ".token "
-                        + "SET bitcoin_amount=? WHERE nxt_txid=0")) {
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET exchange_rate=?")) {
             stmt.setLong(1, rate.movePointRight(8).longValue());
             count = stmt.executeUpdate();
             if (count > 0) {
@@ -297,7 +444,212 @@ public class TokenDb {
     }
 
     /**
-     * See if a transaction token exists
+     * Check if an unspent transaction exists
+     *
+     * @param   txid            Transaction identifier
+     * @param   index           Transaction output index
+     * @return                  TRUE if the transaction exists
+     */
+    static boolean unspentOutputExists(byte[] txid, int index) {
+        boolean exists = false;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + UNSPENT_TABLE
+                        + " WHERE txid=? AND index=?")) {
+            stmt.setBytes(1, txid);
+            stmt.setInt(2, index);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    exists = true;
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get unspent output from Token Exchange table", exc);
+        }
+        return exists;
+    }
+
+    /**
+     * Get an unspent output
+     *
+     * @param   txid            Transaction identifier
+     * @param   index           Transaction output index
+     * @return                  Unspent output or null
+     */
+    static BitcoinUnspent getUnspentOutput(byte[] txid, int index) {
+        BitcoinUnspent unspent = null;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
+                        + " WHERE txid=? AND index=?")) {
+            stmt.setBytes(1, txid);
+            stmt.setInt(2, index);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    unspent = new BitcoinUnspent(rs);
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get unspent output from Token Exchange table", exc);
+        }
+        return unspent;
+    }
+
+    /**
+     * Get all unspent outputs ordered by amount
+     *
+     * @return                  List of unspent outputs
+     */
+    static List<BitcoinUnspent> getUnspentOutputs() {
+        List<BitcoinUnspent> unspentList = new ArrayList<>();
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
+                        + " ORDER BY amount ASC")) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    unspentList.add(new BitcoinUnspent(rs));
+                }
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get unspent outputs from Token Exchange table", exc);
+        }
+        return unspentList;
+    }
+
+    /**
+     * Store an unspent output
+     *
+     * @param   unspent         Unspent output
+     * @return                  TRUE if the output was stored
+     */
+    static boolean storeUnspentOutput(BitcoinUnspent unspent) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + UNSPENT_TABLE
+                        + " (txid,index,amount,height,child_number,parent_number)"
+                        + " VALUES(?,?,?,?,?,?)")) {
+            stmt.setBytes(1, unspent.getId());
+            stmt.setInt(2, unspent.getIndex());
+            stmt.setLong(3, unspent.getAmount());
+            stmt.setInt(4, unspent.getHeight());
+            stmt.setInt(5, unspent.getChildNumber().getI());
+            stmt.setInt(6, unspent.getParentNumber().getI());
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to store unspent output in Token Exchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
+     * Delete an unspent output
+     *
+     * @param   txid            Transaction identifier
+     * @param   index           Transaction output index
+     * @return                  TRUE if the output was deleted
+     */
+    static boolean deleteUnspentOutput(byte[] txid, int index) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + UNSPENT_TABLE
+                        + " WHERE txid=? AND index=?")) {
+            stmt.setBytes(1, txid);
+            stmt.setInt(2, index);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to delete unspent output from Token Exchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
+     * Get a broadcast transaction
+     *
+     * @param   txid            Transaction identifier
+     * @return                  Transaction or null
+     */
+    static Transaction getBroadcastTransaction(byte[] txid) {
+        Transaction tx = null;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT payload FROM " + BROADCAST_TABLE + " WHERE txid=?")) {
+            stmt.setBytes(1, txid);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    tx = new Transaction(Context.get().getParams(), rs.getBytes("payload"));
+                    tx.getConfidence().setSource(TransactionConfidence.Source.SELF);
+                }
+            }
+        } catch (ProtocolException exc) {
+            Logger.logErrorMessage("Unable to create Bitcoin transaction", exc);
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get a broadcast transaction from the Token Exchange table", exc);
+        }
+        return tx;
+    }
+
+    /**
+     * Get all broadcast transactions
+     *
+     * @return                  List of broadcast transactions
+     */
+    static List<Transaction> getBroadcastTransactions() {
+        List<Transaction> txList = new ArrayList<>();
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT payload FROM " + BROADCAST_TABLE)) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Transaction tx = new Transaction(Context.get().getParams(), rs.getBytes("payload"));
+                    tx.getConfidence().setSource(TransactionConfidence.Source.SELF);
+                    txList.add(tx);
+                }
+            }
+        } catch (ProtocolException exc) {
+            Logger.logErrorMessage("Unable to create Bitcoin transaction", exc);
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to get broadcast transactions from the Token Exchange table", exc);
+        }
+        return txList;
+    }
+
+    /**
+     * Store a broadcast transaction
+     *
+     * @param   tx              Transaction
+     * @return                  TRUE if the transaction was stored
+     */
+    static boolean storeBroadcastTransaction(Transaction tx) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BROADCAST_TABLE
+                        + " (txid,payload) VALUES(?,?)")) {
+            byte[] payload = tx.bitcoinSerialize();
+            stmt.setBytes(1, tx.getHash().getBytes());
+            stmt.setBytes(2, payload);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to store broadcast transaction in Token Exchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
+     * Delete a broadcast transaction
+     *
+     * @param   txId            Transaction identifier
+     * @return                  TRUE if the transaction was deleted
+     */
+    static boolean deleteBroadcastTransaction(byte[] txId) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + BROADCAST_TABLE + " WHERE txid=?")) {
+            stmt.setBytes(1, txId);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to delete broadcast transaction from Token Exchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
+     * See if a token transaction exists
      *
      * @param   id              Transaction identifier
      * @return                  TRUE if the transaction token exists
@@ -305,7 +657,7 @@ public class TokenDb {
     static boolean tokenExists(long id) {
         boolean exists = false;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + DB_SCHEMA + ".token WHERE nxt_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + NXT_TABLE + " WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -327,7 +679,7 @@ public class TokenDb {
     static TokenTransaction getToken(long id) {
         TokenTransaction tx = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".token WHERE nxt_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE + " WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -341,17 +693,17 @@ public class TokenDb {
     }
 
     /**
-     * Get tokens at or above the specified height
+     * Get token transactions at or above the specified height
      *
      * @param   height          Block height
      * @param   exchanged       TRUE to return exchanged tokens
-     * @return                  List of transaction tokens
+     * @return                  List of token transactions
      */
     static List<TokenTransaction> getTokens(int height, boolean exchanged) {
         List<TokenTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".token "
-                        + "WHERE height>=? " + (exchanged ? "" : "AND exchanged=false ")
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE
+                        + " WHERE height>=? " + (exchanged ? "" : "AND exchanged=false ")
                         + "ORDER BY height ASC,timestamp ASC")) {
             stmt.setInt(1, Math.max(1, Math.max(0, height)));
             try (ResultSet rs = stmt.executeQuery()) {
@@ -366,7 +718,7 @@ public class TokenDb {
     }
 
     /**
-     * Get pending transaction tokens at or below the specified height
+     * Get pending token transaction at or below the specified height
      *
      * @param   height          Block height
      * @return                  List of transaction tokens
@@ -374,8 +726,8 @@ public class TokenDb {
     static List<TokenTransaction> getPendingTokens(int height) {
         List<TokenTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".token "
-                        + "WHERE exchanged=false AND height>0 AND height<=? ORDER BY height ASC")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE
+                        + " WHERE exchanged=false AND height<=? ORDER BY height ASC")) {
             stmt.setInt(1, height);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -397,9 +749,9 @@ public class TokenDb {
     static boolean storeToken(TokenTransaction tx) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + DB_SCHEMA + ".token "
-                        + "(nxt_txid,sender,height,timestamp,exchanged,token_amount,bitcoin_amount,bitcoin_address) "
-                        + "VALUES(?,?,?,?,false,?,?,?)")) {
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + NXT_TABLE
+                        + " (nxt_txid,sender,height,timestamp,exchanged,token_amount,bitcoin_amount,bitcoin_address)"
+                        + " VALUES(?,?,?,?,false,?,?,?)")) {
             stmt.setLong(1, tx.getNxtTxId());
             stmt.setLong(2, tx.getSenderId());
             stmt.setInt(3, tx.getHeight());
@@ -415,7 +767,7 @@ public class TokenDb {
     }
 
     /**
-     * Update the token status
+     * Update the token transaction status
      *
      * @param   tx              Token transaction
      * @return                  TRUE if the token was updated
@@ -423,8 +775,8 @@ public class TokenDb {
     static boolean updateToken(TokenTransaction tx) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("UPDATE " + DB_SCHEMA + ".token "
-                        + "SET exchanged=true,bitcoin_txid=? WHERE nxt_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + NXT_TABLE
+                        + " SET exchanged=true,bitcoin_txid=? WHERE nxt_txid=?")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
             stmt.setLong(2, tx.getNxtTxId());
             count = stmt.executeUpdate();
@@ -435,18 +787,15 @@ public class TokenDb {
     }
 
     /**
-     * Delete a token
+     * Delete a token transaction
      *
      * @param   id              Token identifier
      * @return                  TRUE if the token was deleted
      */
     static boolean deleteToken(long id) {
-        if (id == 0) {
-            return false;
-        }
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + DB_SCHEMA + ".token WHERE nxt_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + NXT_TABLE + " WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
@@ -456,24 +805,26 @@ public class TokenDb {
     }
 
     /**
-     * Store a Bitcoin account
+     * Store an account
      *
-     * @param   account         Bitcoin account
+     * @param   account         Account
      * @return                  TRUE if the address was stored
      */
     static boolean storeAccount(BitcoinAccount account) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + DB_SCHEMA + ".account "
-                        + "(bitcoin_address,account_id,public_key) "
-                        + "VALUES(?,?,?)")) {
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + ACCOUNT_TABLE
+                        + " (bitcoin_address,child_number,account_id,public_key,timestamp)"
+                        + " VALUES(?,?,?,?,?)")) {
             stmt.setString(1, account.getBitcoinAddress());
-            stmt.setLong(2, account.getAccountId());
+            stmt.setInt(2, account.getChildNumber());
+            stmt.setLong(3, account.getAccountId());
             if (account.getPublicKey() != null) {
-                stmt.setBytes(3, account.getPublicKey());
+                stmt.setBytes(4, account.getPublicKey());
             } else {
-                stmt.setNull(3, Types.BINARY);
+                stmt.setNull(4, Types.BINARY);
             }
+            stmt.setInt(5, account.getTimestamp());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store account in TokenExchange table", exc);
@@ -482,16 +833,16 @@ public class TokenDb {
     }
 
     /**
-     * Get the Bitcoin accounts associated with a Nxt account identifier
+     * Get the accounts associated with a Nxt account identifier ordered by timestamp
      *
      * @param   account_id      Account identifier
-     * @return                  Bitcoin account list
+     * @return                  Account list
      */
     static List<BitcoinAccount> getAccount(long accountId) {
         List<BitcoinAccount> accountList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".account "
-                        + "WHERE account_id=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE
+                        + " WHERE account_id=? ORDER BY timestamp ASC")) {
             stmt.setLong(1, accountId);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -505,7 +856,7 @@ public class TokenDb {
     }
 
     /**
-     * Get the Nxt account associated with a Bitcoin address
+     * Get the account associated with a Bitcoin address
      *
      * @param   address         Bitcoin address
      * @return                  Nxt account or null
@@ -513,8 +864,7 @@ public class TokenDb {
     static BitcoinAccount getAccount(String address) {
         BitcoinAccount account = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".account "
-                        + "WHERE bitcoin_address=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -528,15 +878,15 @@ public class TokenDb {
     }
 
     /**
-     * Get the Nxt accounts associated with Bitcoin addresses
+     * Get all of the accounts ordered by account identifier and timestamp
      *
      * @return                  Account list
      */
     static List<BitcoinAccount> getAccounts() {
         List<BitcoinAccount> accountList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".account "
-                        + "ORDER BY account_id")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE
+                        + " ORDER BY account_id ASC,timestamp ASC")) {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     accountList.add(new BitcoinAccount(rs));
@@ -549,6 +899,25 @@ public class TokenDb {
     }
 
     /**
+     * Delete an account address
+     *
+     * @param   address         Bitcoin address associated with an account
+     * @return                  TRUE if the address was deleted
+     */
+    static boolean deleteAccountAddress(String address) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + ACCOUNT_TABLE
+                        + " WHERE bitcoin_address=?")) {
+            stmt.setString(1, address);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to delete account address from TokenExchange table", exc);
+        }
+        return count != 0;
+    }
+
+    /**
      * Store a Bitcoin transaction
      *
      * @param   tx              Bitcoin transaction
@@ -557,10 +926,10 @@ public class TokenDb {
     static boolean storeTransaction(BitcoinTransaction tx) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + DB_SCHEMA + ".transaction "
-                        + "(bitcoin_txid,height,timestamp,bitcoin_address,bitcoin_amount,"
-                        + "token_amount,account_id,exchanged,nxt_txid) "
-                        + "VALUES(?,?,?,?,?,?,?,false,0)")) {
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BITCOIN_TABLE
+                        + " (bitcoin_txid,height,timestamp,bitcoin_address,bitcoin_amount,"
+                        + "  token_amount,account_id,exchanged,nxt_txid)"
+                        + " VALUES(?,?,?,?,?,?,?,false,0)")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
             stmt.setInt(2, tx.getHeight());
             stmt.setInt(3, tx.getTimestamp());
@@ -584,8 +953,8 @@ public class TokenDb {
     static boolean updateTransaction(BitcoinTransaction tx) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("UPDATE " + DB_SCHEMA + ".transaction "
-                        + "SET exchanged=?,nxt_txid=?,height=?,timestamp=? WHERE bitcoin_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
+                        + " SET exchanged=?,nxt_txid=?,height=?,timestamp=? WHERE bitcoin_txid=?")) {
             stmt.setBoolean(1, tx.isExchanged());
             stmt.setLong(2, tx.getNxtTxId());
             stmt.setInt(3, tx.getHeight());
@@ -607,8 +976,7 @@ public class TokenDb {
     static boolean transactionExists(byte[] id) {
         boolean exists = false;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE bitcoin_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE + " WHERE bitcoin_txid=?")) {
             stmt.setBytes(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -630,8 +998,7 @@ public class TokenDb {
     static boolean transactionExists(String address) {
         boolean exists = false;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE bitcoin_address=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -653,8 +1020,7 @@ public class TokenDb {
     static BitcoinTransaction getTransaction(byte[] txid) {
         BitcoinTransaction tx = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE bitcoin_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE + " WHERE bitcoin_txid=?")) {
             stmt.setBytes(1, txid);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -678,8 +1044,7 @@ public class TokenDb {
     static List<BitcoinTransaction> getTransactions(int height, String address, boolean exchanged) {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE height>=? "
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE + " WHERE height>=? "
                         + (address!=null ? (exchanged ? "AND bitcoin_address=? " :
                                                         "AND bitcoin_address=? AND exchanged=false ") :
                                            (exchanged ? "" : "AND exchanged=false "))
@@ -708,8 +1073,8 @@ public class TokenDb {
     static List<BitcoinTransaction> getPendingTransactions(int height) {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE exchanged=false AND height>0 AND height<=? ORDER BY height ASC")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
+                        + " WHERE exchanged=false AND height<=? ORDER BY height ASC")) {
             stmt.setInt(1, height);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -734,8 +1099,7 @@ public class TokenDb {
         }
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + DB_SCHEMA + ".transaction "
-                        + "WHERE bitcoin_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + BITCOIN_TABLE + " WHERE bitcoin_txid=?")) {
             stmt.setBytes(1, id);
             count = stmt.executeUpdate();
         } catch (SQLException exc) {

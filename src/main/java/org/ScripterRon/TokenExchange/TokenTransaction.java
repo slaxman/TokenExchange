@@ -15,6 +15,8 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.util.Convert;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
@@ -116,6 +118,15 @@ class TokenTransaction {
     }
 
     /**
+     * Return the sender identifier as a string
+     *
+     * @return                  RS-encoded sender identifier
+     */
+    String getSenderIdRS() {
+        return Convert.rsAccount(senderId);
+    }
+
+    /**
      * Return the block height
      *
      * @return                  Block height
@@ -182,9 +193,18 @@ class TokenTransaction {
     /**
      * Return the Bitcoin transaction identifier
      *
-     * @return                  Bitcoin transaction identifier
+     * @return                  Bitcoin transaction identifier or null
      */
     byte[] getBitcoinTxId() {
         return bitcoinTxId;
+    }
+
+    /**
+     * Return the Bitcoin transaction identifier as a string
+     *
+     * @return                  Transaction identifier string
+     */
+    String getBitcoinTxIdString() {
+        return bitcoinTxId != null ? Convert.toHexString(bitcoinTxId) : "";
     }
 }

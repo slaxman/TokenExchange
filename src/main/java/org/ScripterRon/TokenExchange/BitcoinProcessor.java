@@ -25,12 +25,12 @@ import nxt.util.ThreadPool;
 import org.bitcoinj.core.Address;
 import org.bitcoinj.core.ScriptException;
 import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionOutput;
 
 import java.math.BigDecimal;
-import java.util.Date;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
@@ -43,7 +43,7 @@ public class BitcoinProcessor implements Runnable {
     /** Processing thread */
     private static Thread processingThread;
 
-    /** Processing lock */
+    /** Bitcoin processing lock */
     private static final ReentrantLock processingLock = new ReentrantLock();
 
     /** Processing queue */
@@ -99,7 +99,7 @@ public class BitcoinProcessor implements Runnable {
     }
 
     /**
-     * Add a new Bitcoin transaction to the database
+     * Add a new Bitcoin transaction to the database or update an existing transaction
      *
      * @param   tx              Transaction
      */
@@ -107,26 +107,25 @@ public class BitcoinProcessor implements Runnable {
         Sha256Hash hash = tx.getHash();
         obtainLock();
         try {
-            int height;
-            int timestamp = Nxt.getEpochTime();
-            if (TokenDb.transactionExists(hash.getBytes())) {
-                Logger.logDebugMessage("Bitcoin transaction " + hash + " already in database");
-                return;
-            }
             TransactionConfidence confidence = tx.getConfidence();
-            if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.BUILDING) {
-                height = confidence.getAppearedAtChainHeight();
-                Date txDate = tx.getUpdateTime();
-                if (txDate != null) {
-                    timestamp = Convert.toEpochTime(txDate.getTime());
-                }
-            } else if (confidence.getConfidenceType() == TransactionConfidence.ConfidenceType.PENDING) {
-                height = 0;
-            } else {
-                Logger.logErrorMessage("Bitcoin transaction " + hash + " is not PENDING or BUILDING, "
-                        + "transaction ignored");
+            if (confidence.getConfidenceType() != TransactionConfidence.ConfidenceType.BUILDING) {
                 return;
             }
+            int height = confidence.getAppearedAtChainHeight();
+            int timestamp = Nxt.getEpochTime();
+            BitcoinTransaction btx = TokenDb.getTransaction(hash.getBytes());
+            //
+            // Update an existing transaction (this can happen if the block chain
+            // is reorganized)
+            //
+            if (btx != null) {
+                btx.setHeight(confidence.getAppearedAtChainHeight());
+                TokenDb.updateTransaction(btx);
+                return;
+            }
+            //
+            // Add a new transaction
+            //
             List<TransactionOutput> outputs = tx.getOutputs();
             for (TransactionOutput output : outputs) {
                 Address address = output.getAddressFromP2PKHScript(BitcoinWallet.getNetworkParameters());
@@ -142,14 +141,10 @@ public class BitcoinProcessor implements Runnable {
                 }
                 BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
                 BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                BitcoinTransaction btx = new BitcoinTransaction(hash.getBytes(), height, timestamp,
-                        bitcoinAddress, account.getAccountId(),
-                        bitcoinAmount.movePointRight(8).longValue(),
+                btx = new BitcoinTransaction(hash.getBytes(), height, timestamp, bitcoinAddress,
+                        account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
-                if (!TokenDb.storeTransaction(btx)) {
-                    TokenAddon.suspend("Unable to store Bitcoin transaction in database");
-                    break;
-                }
+                TokenDb.storeTransaction(btx);
                 Logger.logDebugMessage("Received Bitcoin transaction " + hash +
                         " to " + bitcoinAddress + " for " +
                         bitcoinAmount.stripTrailingZeros().toPlainString() + " BTC");
@@ -167,11 +162,13 @@ public class BitcoinProcessor implements Runnable {
 
     /**
      * Process pending Bitcoin transactions
+     *
+     * @param   block           New best block
      */
-    static void processTransactions() {
+    static void processTransactions(StoredBlock block) {
         try {
-            int chainHeight = BitcoinWallet.getChainHeight();
-            if (chainHeight == lastSeenHeight) {
+            int chainHeight = block.getHeight();
+            if (chainHeight <= lastSeenHeight) {
                 return;
             }
             lastSeenHeight = chainHeight;
@@ -213,37 +210,13 @@ public class BitcoinProcessor implements Runnable {
                         return;
                     }
                     long unitBalance = currency.getUnconfirmedUnits();
-                    List<BitcoinTransaction> txList = TokenDb.getPendingTransactions(lastSeenHeight - TokenAddon.bitcoinConfirmations);
                     //
                     // Processing pending Bitcoin transactions
                     //
+                    List<BitcoinTransaction> txList =
+                            TokenDb.getPendingTransactions(lastSeenHeight - TokenAddon.bitcoinConfirmations);
                     for (BitcoinTransaction tx : txList) {
-                        String bitcoinTxId = Convert.toHexString(tx.getBitcoinTxId());
-                        int txHeight = tx.getHeight();
-                        if (txHeight == 0) {
-                            Transaction btx = BitcoinWallet.getTransaction(bitcoinTxId);
-                            if (btx == null) {
-                                TokenAddon.suspend("Bitcoin transaction " + bitcoinTxId
-                                        + " is no longer in the wallet");
-                                break;
-                            }
-                            TransactionConfidence confidence = btx.getConfidence();
-                            if (confidence.getConfidenceType() != TransactionConfidence.ConfidenceType.BUILDING) {
-                                continue;
-                            }
-                            txHeight = confidence.getAppearedAtChainHeight();
-                            tx.setHeight(txHeight);
-                            Date txDate = btx.getUpdateTime();
-                            if (txDate != null) {
-                                int txTimestamp = Convert.toEpochTime(txDate.getTime());
-                                if (txTimestamp < tx.getTimestamp()) {
-                                    tx.setTimestamp(txTimestamp);
-                                }
-                            }
-                            if (!TokenDb.updateTransaction(tx)) {
-                                throw new RuntimeException("Unable to update transaction in TokenExchange database");
-                            }
-                        }
+                        String bitcoinTxId = tx.getBitcoinTxIdString();
                         long units = tx.getTokenAmount();
                         if (units > unitBalance) {
                             TokenAddon.suspend("Insufficient " + TokenAddon.currencyCode + " currency available "

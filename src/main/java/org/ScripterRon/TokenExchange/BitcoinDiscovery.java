@@ -18,11 +18,9 @@ package org.ScripterRon.TokenExchange;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.AddressMessage;
-import org.bitcoinj.core.Message;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
-import org.bitcoinj.core.listeners.PreMessageReceivedEventListener;
 import org.bitcoinj.net.discovery.DnsDiscovery;
 import org.bitcoinj.net.discovery.PeerDiscovery;
 import org.bitcoinj.net.discovery.PeerDiscoveryException;
@@ -46,7 +44,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Peer discovery for the Bitcoin wallet
  */
-public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventListener {
+public class BitcoinDiscovery implements PeerDiscovery {
 
     /** A services flag that denotes whether the peer has a copy of the block chain */
     static final long NODE_NETWORK = 1;
@@ -68,42 +66,31 @@ public class BitcoinDiscovery implements PeerDiscovery, PreMessageReceivedEventL
     private DnsDiscovery dnsDiscovery;
 
     /**
-     * Process a received message
-     *
-     * We will look for ADDR messages and add the peers to our list.  If the
-     * peer is already in the list, we will update the services and timestamp
-     * for the peer.
+     * Process an Address message
      *
      * @param   peer            Peer receiving the message
-     * @param   message         Received message
-     * @return                  Message to be processed or null to discard message
+     * @param   message         Received ADDR message
      */
-    @Override
-    public Message onPreMessageReceived(Peer peer, Message message) {
-        if (message instanceof AddressMessage) {
-            List<PeerAddress> peerAddrs = ((AddressMessage)message).getAddresses();
-            NetworkParameters networkParams = BitcoinWallet.getNetworkParameters();
-            synchronized(peerAddresses) {
-                peerAddrs.forEach((peerAddr) -> {
-                    if ((peerAddr.getServices().longValue() & NODE_BLOOM) != 0) {
-                        InetSocketAddress socketAddr = peerAddr.getSocketAddress();
-                        if (!socketAddr.getAddress().isLoopbackAddress()) {
-                            PeerAddress addr = peerMap.get(socketAddr);
-                            if (addr == null) {
-                                addr = new PeerAddress(networkParams, peerAddr.getAddr(), peerAddr.getPort());
-                                peerAddresses.add(addr);
-                                peerMap.put(socketAddr, addr);
-                                Logger.logDebugMessage("Added TokenExchange peer "
-                                        + addr.getAddr().toString() + ":" + addr.getPort());
-                            }
-                            addr.setTime(peerAddr.getTime());
-                            addr.setServices(peerAddr.getServices());
-                        }
+    void processAddressMessage(Peer peer, AddressMessage message) {
+        List<PeerAddress> peerAddrs = message.getAddresses();
+        NetworkParameters networkParams = BitcoinWallet.getNetworkParameters();
+        synchronized(peerAddresses) {
+            peerAddrs.forEach((peerAddr) -> {
+                InetSocketAddress socketAddr = peerAddr.getSocketAddress();
+                if (!socketAddr.getAddress().isLoopbackAddress()) {
+                    PeerAddress addr = peerMap.get(socketAddr);
+                    if (addr == null) {
+                        addr = new PeerAddress(networkParams, peerAddr.getAddr(), peerAddr.getPort());
+                        peerAddresses.add(addr);
+                        peerMap.put(socketAddr, addr);
+                        Logger.logDebugMessage("Added TokenExchange peer "
+                                + addr.getAddr().toString() + ":" + addr.getPort());
                     }
-                });
-            }
+                    addr.setTime(peerAddr.getTime());
+                    addr.setServices(peerAddr.getServices());
+                }
+            });
         }
-        return message;
     }
 
     /**

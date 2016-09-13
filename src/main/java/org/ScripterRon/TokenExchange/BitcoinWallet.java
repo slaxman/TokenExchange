@@ -16,35 +16,58 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Constants;
+import nxt.Db;
 import nxt.Nxt;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.Address;
 import org.bitcoinj.core.AddressFormatException;
+import org.bitcoinj.core.AddressMessage;
+import org.bitcoinj.core.BlockChain;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
-import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
 import org.bitcoinj.core.PeerGroup;
+import org.bitcoinj.core.ScriptException;
+import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionInput;
+import org.bitcoinj.core.TransactionOutPoint;
+import org.bitcoinj.core.TransactionOutput;
+import org.bitcoinj.core.VerificationException;
 import org.bitcoinj.core.WrongNetworkException;
-import org.bitcoinj.kits.WalletAppKit;
+import org.bitcoinj.crypto.ChildNumber;
+import org.bitcoinj.crypto.DeterministicHierarchy;
+import org.bitcoinj.crypto.DeterministicKey;
+import org.bitcoinj.crypto.HDKeyDerivation;
+import org.bitcoinj.crypto.HDUtils;
+import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.core.listeners.TransactionReceivedInBlockListener;
 import org.bitcoinj.params.MainNetParams;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptBuilder;
+import org.bitcoinj.store.BlockStore;
+import org.bitcoinj.store.BlockStoreException;
+import org.bitcoinj.store.SPVBlockStore;
 import org.bitcoinj.utils.Threading;
-import org.bitcoinj.wallet.SendRequest;
-import org.bitcoinj.wallet.Wallet;
+import org.bitcoinj.wallet.DeterministicSeed;
 
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.TimeUnit;
-import org.bitcoinj.core.Sha256Hash;
+import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
+import org.bitcoinj.core.TransactionConfidence;
 
 /**
  *  Bitcoin SPV wallet
@@ -52,34 +75,70 @@ import org.bitcoinj.core.Sha256Hash;
 public class BitcoinWallet {
 
     /** Maximum number of peer connections */
-    private static final int MAX_CONNECTIONS = 6;
+    private static final int MAX_CONNECTIONS = 8;
 
     /** Wallet initialized */
     private static volatile boolean walletInitialized = false;
 
+    /** Wallet lock */
+    private static final ReentrantLock walletLock = new ReentrantLock();
+
+    /** Network parameters */
+    private static NetworkParameters params;
+
     /** Wallet context */
     private static Context context;
+
+    /** Root key */
+    private static DeterministicKey rootKey;
+
+    /** External key */
+    private static DeterministicKey externalParentKey;
+
+    /** Internal key */
+    private static DeterministicKey internalParentKey;
+
+    /** Deterministic hierarchy */
+    private static DeterministicHierarchy hierarchy;
+
+    /** Primary account path */
+    private static final List<ChildNumber> ACCOUNT_ZERO_PATH = new ArrayList<>(1);
+    static {
+        ACCOUNT_ZERO_PATH.add(ChildNumber.ZERO_HARDENED);
+    }
 
     /** Wallet directory */
     private static File walletDirectory;
 
-    /** Wallet kit */
-    private static WalletAppKit walletKit;
+    /** Block store */
+    private static BlockStore blockStore;
 
-    /** Wallet */
-    private static Wallet wallet;
+    /** Block chain */
+    private static RollbackBlockChain blockChain;
 
     /** Wallet peer group */
     private static PeerGroup peerGroup;
 
+    /** Wallet key */
+    private static DeterministicKey walletKey;
+
     /** Wallet address */
     private static String walletAddress;
 
-    /** Peer message listener */
+    /** Wallet balance */
+    private static long walletBalance;
+
+    /** Receive addresses */
+    private static final Map<Address, ReceiveAddress> receiveAddresses = new HashMap<>();
+
+    /** Peer discovery */
     private static final BitcoinDiscovery peerDiscovery = new BitcoinDiscovery();
 
     /**
      * Initialize the Bitcoin wallet
+     *
+     * Wallet initialization is performed on the Bitcoin processor thread while the
+     * Nxt processor thread is blocked waiting for the completion of wallet initialization.
      *
      * @return                  TRUE if initialization was successful
      */
@@ -106,104 +165,78 @@ public class BitcoinWallet {
         int index2 = dbPath.lastIndexOf('\\');
         dbPath = dbPath.substring(0, Math.max(index1, index2));
         walletDirectory = new File(dbPath, "TokenExchange");
-        Logger.logInfoMessage("TokenExchange wallet files stored in " + walletDirectory.toString());
+        Logger.logInfoMessage("TokenExchange files stored in " + walletDirectory.toString());
+        if (!walletDirectory.exists()) {
+            if (!walletDirectory.mkdirs()) {
+                Logger.logErrorMessage("Unable to create TokenExchange directory");
+                return false;
+            }
+        }
         //
-        // Get the wallet context
+        // Initialize BitcoinJ for use on the main Bitcoin network
         //
-        Coin txFee = Coin.valueOf(TokenAddon.bitcoinTxFee.movePointRight(8).longValue());
-        NetworkParameters params = MainNetParams.get();
-        context = new Context(params, 100, txFee, false);
+        params = MainNetParams.get();
+        context = new Context(params);
         try {
             //
-            // Load the saved peers
+            // Initialize the deterministic keys
             //
-            int peerCount = peerDiscovery.loadPeers();
+            initKeys();
             //
-            // Create the wallet
+            // Load the saved peers for use during peer discovery
             //
-            walletKit = new WalletAppKit(context, walletDirectory, "wallet") {
+            peerDiscovery.loadPeers();
+            //
+            // Create the block store
+            //
+            File storeFile = new File(walletDirectory, "spvchain.dat");
+            blockStore = new SPVBlockStore(params, storeFile);
+            //
+            // Create the block chain
+            //
+            blockChain = new RollbackBlockChain(context, blockStore);
+            blockChain.addNewBestBlockListener(Threading.SAME_THREAD, (block) -> {
+                propagateContext();
+                if (!TokenAddon.isSuspended()) {
+                    BitcoinProcessor.processTransactions(block);
+                }
+            });
+            blockChain.addTransactionReceivedListener(Threading.SAME_THREAD, new TransactionReceivedInBlockListener() {
                 @Override
-                protected void onSetupCompleted() {
-                    peerGroup().setUseLocalhostPeerWhenPossible(false);
-                    peerGroup().addConnectedEventListener((peer, count) ->
-                        Logger.logInfoMessage("Bitcoin peer "
-                                + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
-                                + " connected, peer count " + count));
-                    peerGroup().addDisconnectedEventListener((peer, count) ->
-                        Logger.logInfoMessage("Bitcoin peer "
-                                + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
-                                + " disconnected, peer count " + count));
-                    peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, peerDiscovery);
-                    wallet().allowSpendingUnconfirmedTransactions();
-                    wallet().addChangeEventListener((eventWallet) -> {
-                        propagateContext();
-                        if (!TokenAddon.isSuspended()) {
-                            BitcoinProcessor.processTransactions();
-                        }
-                    });
-                    wallet().addCoinsReceivedEventListener((eventWallet, tx, oldBalance, newBalance) -> {
-                        propagateContext();
-                        if (!TokenAddon.isSuspended()) {
-                            BitcoinProcessor.addTransaction(tx);
-                        }
-                    });
+                public boolean notifyTransactionIsInBlock(Sha256Hash txHash, StoredBlock block,
+                                BlockChain.NewBlockType blockType, int relativeOffset) {
+                    // Ignore since we aren't using filtered blocks
+                    return false;
                 }
-            };
-            walletKit.setUserAgent(TokenAddon.applicationName, TokenAddon.applicationVersion);
-            walletKit.setAutoSave(true);
-            walletKit.setAutoStop(false);
-            walletKit.setBlockingStartup(false);
-            //
-            // Use a single Bitcoin server if the 'bitcoinServer' configuration option is specified.
-            // Otherwise, we will select servers using peer discovery.
-            //
-            if (TokenAddon.bitcoinServer != null) {
-                String[] addressParts = TokenAddon.bitcoinServer.split(":");
-                String host = addressParts[0];
-                int port;
-                if (addressParts.length > 1) {
-                    port = Integer.valueOf(addressParts[1]);
-                } else {
-                    port = 8333;
+                @Override
+                public void receiveFromBlock(Transaction tx, StoredBlock block,
+                                BlockChain.NewBlockType blockType, int relativeOffset) throws VerificationException {
+                    propagateContext();
+                    processTransaction(tx, block, blockType, relativeOffset);
                 }
-                try {
-                    InetAddress inetAddress = InetAddress.getByName(host);
-                    walletKit.setPeerNodes(new PeerAddress(params, inetAddress, port));
-                } catch (UnknownHostException exc) {
-                    Logger.logErrorMessage("Unable to resolve Bitcoin server address '" + host + "'", exc);
-                    TokenAddon.bitcoinServer = null;
-                }
-            } else {
-                walletKit.setDiscovery(peerDiscovery);
-            }
+            });
             //
-            // Start the wallet and wait until it is up and running
+            // Initialize the network
             //
-            walletKit.startAsync();
-            Logger.logInfoMessage("Waiting for Bitcoin wallet to start ...");
-            walletKit.awaitRunning();
-            Logger.logInfoMessage("Bitcoin wallet started");
-            wallet = walletKit.wallet();
-            peerGroup = walletKit.peerGroup();
-            if (TokenAddon.bitcoinServer == null) {
-                peerGroup.setMaxConnections(MAX_CONNECTIONS);
-            } else {
-                peerGroup.setMaxConnections(1);
-            }
+            initNetwork();
             //
-            // Get the wallet address.  This is the address used to fund the wallet and
-            // receive change from send requests.
+            // Start the peer group
             //
-            walletAddress = TokenDb.getWalletAddress();
-            if (walletAddress == null) {
-                throw new RuntimeException("Unable to get wallet address from database, processing terminated");
+            peerGroup.start();
+            Logger.logInfoMessage("Token Exchange peer group started");
+            //
+            // Download the block chain
+            //
+            Logger.logInfoMessage("Downloading the block chain");
+            peerGroup.downloadBlockChain();
+            Logger.logInfoMessage("Block chain download completed");
+            //
+            // Broadcast pending transactions
+            //
+            List<Transaction> pendingList = TokenDb.getBroadcastTransactions();
+            for (Transaction tx : pendingList) {
+                peerGroup.broadcastTransaction(tx);
             }
-            if (walletAddress.isEmpty()) {
-                walletAddress = getNewAddress();
-                TokenDb.setWalletAddress(walletAddress);
-            }
-            Logger.logInfoMessage("Wallet address " + walletAddress
-                        + ", Balance " + BitcoinWallet.getBalance().toPlainString() + " BTC");
             //
             // Wallet initialization completed.  The Nxt transaction listener is
             // blocked waiting on us, so let it start running now.
@@ -218,18 +251,307 @@ public class BitcoinWallet {
     }
 
     /**
+     * Block chain with rollback support
+     */
+    private static class RollbackBlockChain extends BlockChain {
+
+        /**
+         * Create the block chain
+         *
+         * @param   context                 BitcoinJ context
+         * @param   blockStore              Associated block store
+         * @throws  BlockStoreException     Error occurred creating the block chain
+         */
+        RollbackBlockChain(Context context, BlockStore blockStore) throws BlockStoreException {
+            super(context, blockStore);
+        }
+
+        /**
+         * Rollback the block chain
+         *
+         * @param   height                  Desired height
+         * @throws  BlockStoreException     Unable to rollback the block chain
+         */
+        public void rollback(int height) throws BlockStoreException {
+            rollbackBlockStore(height);
+            Logger.logInfoMessage("Bitcoin block chain rollback to height " + height + " completed");
+        }
+    }
+
+    /**
+     * Receive address
+     */
+    private static class ReceiveAddress {
+
+        /** Bitcoin address hash */
+        private final byte[] hash;
+
+        /** Bitcoin address */
+        private final String address;
+
+        /** Address child */
+        private final ChildNumber childNumber;
+
+        /** Address parent */
+        private final ChildNumber parentNumber;
+
+        /**
+         * Create a receive address
+         *
+         * @param   address         Bitcoin address
+         * @param   childNumber     Child number
+         * @param   parentNumber    Parent number
+         */
+        public ReceiveAddress(Address address, ChildNumber childNumber, ChildNumber parentNumber) {
+            this.hash = address.getHash160();
+            this.address = address.toBase58();
+            this.childNumber = childNumber;
+            this.parentNumber = parentNumber;
+        }
+
+        /**
+         * Return the Bitcoin address
+         *
+         * @return              Bitcoin address
+         */
+        public String getAddress() {
+            return address;
+        }
+
+        /**
+         * Return the child number
+         *
+         * @return              Child number
+         */
+        public ChildNumber getChildNumber() {
+            return childNumber;
+        }
+
+        /**
+         * Return the parent number
+         *
+         * @return              Parent number
+         */
+        public ChildNumber getParentNumber() {
+            return parentNumber;
+        }
+
+        /**
+         * Get the hash code
+         *
+         * @return              Hash code
+         */
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(hash);
+        }
+
+        /**
+         * Check if the supplied object is equal to this object
+         *
+         * @param   obj         Object to check
+         * @return              TRUE if the objects are equal
+         */
+        @Override
+        public boolean equals(Object obj) {
+            return (obj instanceof ReceiveAddress) && Arrays.equals(((ReceiveAddress)obj).hash, hash);
+        }
+    }
+
+    /**
+     * Initialize the deterministic keys
+     */
+    private static void initKeys() {
+        //
+        // Initialize the deterministic hierarchy
+        //
+        DeterministicSeed seed = TokenDb.getSeed();
+        if (seed == null) {
+            seed = new DeterministicSeed(new SecureRandom(), DeterministicSeed.DEFAULT_SEED_ENTROPY_BITS,
+                    "", System.currentTimeMillis()/1000);
+            if (!TokenDb.storeSeed(seed)) {
+                throw new IllegalStateException("Unable to store the new seed");
+            }
+        }
+        rootKey = HDKeyDerivation.createMasterPrivateKey(seed.getSeedBytes());
+        rootKey.setCreationTimeSeconds(seed.getCreationTimeSeconds());
+        hierarchy = new DeterministicHierarchy(rootKey);
+        hierarchy.get(ACCOUNT_ZERO_PATH, false, true);
+        externalParentKey = hierarchy.deriveChild(ACCOUNT_ZERO_PATH, false, false, ChildNumber.ZERO);
+        internalParentKey = hierarchy.deriveChild(ACCOUNT_ZERO_PATH, false, false, ChildNumber.ONE);
+        //
+        // Get the wallet address (external child 0).  This is the address used to fund the wallet.
+        //
+        List<ChildNumber> path = HDUtils.append(externalParentKey.getPath(), ChildNumber.ZERO);
+        walletKey = hierarchy.get(path, false, true);
+        Address address = walletKey.toAddress(params);
+        ReceiveAddress receiveAddress = new ReceiveAddress(address, ChildNumber.ZERO, externalParentKey.getChildNumber());
+        walletAddress = receiveAddress.getAddress();
+        receiveAddresses.put(address, receiveAddress);
+        //
+        // Get the current wallet balance
+        //
+        List<BitcoinUnspent> unspentList = TokenDb.getUnspentOutputs();
+        unspentList.forEach((unspent) -> walletBalance += unspent.getAmount());
+        //
+        // Build the set of receive keys
+        //
+        List<BitcoinAccount> accounts = TokenDb.getAccounts();
+        accounts.forEach((account) -> {
+            Address addr = Address.fromBase58(params, account.getBitcoinAddress());
+            receiveAddresses.put(addr, new ReceiveAddress(addr,
+                    new ChildNumber(account.getChildNumber()), externalParentKey.getChildNumber()));
+        });
+        Logger.logInfoMessage("Wallet address " + walletAddress + ", Balance " + getBalance().toPlainString() + " BTC");
+    }
+
+    /**
+     * Initialize the network
+     */
+    private static void initNetwork() {
+        //
+        // Create the peer group
+        //
+        // Set the fast catch-up time to the database creation time - 2 hours.  We do
+        // this to make sure we get some recent full blocks when we first start (only
+        // the blocks headers are downloaded before the catch-up time)
+        //
+        peerGroup = new PeerGroup(context, blockChain);
+        peerGroup.setUserAgent(TokenAddon.applicationName, TokenAddon.applicationVersion);
+        peerGroup.setUseLocalhostPeerWhenPossible(true);
+        peerGroup.setFastCatchupTimeSecs(TokenDb.getCreationTime() - 2 * 60 * 60);
+        peerGroup.addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, msg) -> {
+            propagateContext();
+            if (msg instanceof AddressMessage) {
+                peerDiscovery.processAddressMessage(peer, (AddressMessage)msg);
+            }
+            return msg;
+        });
+        peerGroup.addConnectedEventListener((peer, count) ->
+            Logger.logDebugMessage("Bitcoin peer "
+                    + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
+                    + " connected, peer count " + count));
+        peerGroup.addDisconnectedEventListener((peer, count) ->
+            Logger.logDebugMessage("Bitcoin peer "
+                    + TokenAddon.formatAddress(peer.getAddress().getAddr(), peer.getAddress().getPort())
+                    + " disconnected, peer count " + count));
+        //
+        // Use a single Bitcoin server if the 'bitcoinServer' configuration option is specified.
+        // Otherwise, we will select servers using peer discovery.
+        //
+        if (TokenAddon.bitcoinServer != null) {
+            String[] addressParts = TokenAddon.bitcoinServer.split(":");
+            String host = addressParts[0];
+            int port;
+            if (addressParts.length > 1) {
+                port = Integer.valueOf(addressParts[1]);
+            } else {
+                port = 8333;
+            }
+            try {
+                InetAddress inetAddress = InetAddress.getByName(host);
+                peerGroup.addAddress(new PeerAddress(params, inetAddress, port));
+                peerGroup.setMaxConnections(1);
+                peerGroup.setMinBroadcastConnections(1);
+            } catch (UnknownHostException exc) {
+                Logger.logErrorMessage("Unable to resolve Bitcoin server address '" + host + "'", exc);
+                TokenAddon.bitcoinServer = null;
+            }
+        }
+        if (TokenAddon.bitcoinServer == null) {
+            peerGroup.addPeerDiscovery(peerDiscovery);
+            peerGroup.setMaxConnections(MAX_CONNECTIONS);
+            peerGroup.setMinBroadcastConnections(MAX_CONNECTIONS / 2);
+        }
+    }
+
+    /**
+     * Process a new transaction
+     *
+     * @param   tx              Transaction
+     * @param   block           Block containing transaction
+     * @param   blockType       Block type
+     * @param   offset          Transaction offset in block transaction list
+     */
+    private static void processTransaction(Transaction tx, StoredBlock block,
+                                BlockChain.NewBlockType blockType, int offset) {
+        Sha256Hash hash = tx.getHash();
+        if (blockType != BlockChain.NewBlockType.BEST_CHAIN) {
+            return;
+        }
+        TransactionConfidence confidence = tx.getConfidence();
+        confidence.setSource(TransactionConfidence.Source.NETWORK);
+        confidence.setConfidenceType(TransactionConfidence.ConfidenceType.BUILDING);
+        confidence.setAppearedAtChainHeight(block.getHeight());
+        //
+        // Remove transaction from broadcast table if it is one of ours
+        //
+        TokenDb.deleteBroadcastTransaction(hash.getBytes());
+        //
+        // Process transaction outputs
+        //
+        // Our change outputs are not processed since they are already
+        // in the unspent transaction output table.
+        //
+        boolean isRelevant = false;
+        int index = -1;
+        List<TransactionOutput> outputs = tx.getOutputs();
+        obtainLock();
+        try {
+            for (TransactionOutput output : outputs) {
+                index++;
+                Address address = output.getAddressFromP2PKHScript(params);
+                if (address == null) {
+                    continue;
+                }
+                ReceiveAddress receiveAddress = receiveAddresses.get(address);
+                if (receiveAddress == null) {
+                    continue;
+                }
+                if (TokenDb.unspentOutputExists(hash.getBytes(), index)) {
+                    continue;
+                }
+                if (!receiveAddress.getAddress().equals(walletAddress)) {
+                    isRelevant = true;
+                }
+                long amount = output.getValue().getValue();
+                BitcoinUnspent unspent = new BitcoinUnspent(hash.getBytes(), index, amount, block.getHeight(),
+                        receiveAddress.getChildNumber(), externalParentKey.getChildNumber());
+                TokenDb.storeUnspentOutput(unspent);
+                walletBalance += amount;
+                Logger.logDebugMessage("Created unspent output " + hash + ":" + index + " for "
+                        + BigDecimal.valueOf(amount, 8).toPlainString() + " BTC");
+            }
+        } catch (ScriptException exc) {
+            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + hash
+                    + ", transaction ignored", exc);
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to process Bitcoin transaction " + hash + ", transaction ignored", exc);
+        } finally {
+            releaseLock();
+        }
+        //
+        // Process an account transaction
+        //
+        if (isRelevant) {
+            BitcoinProcessor.addTransaction(tx);
+        }
+    }
+
+    /**
      * Shutdown the Bitcoin wallet
      */
     static void shutdown() {
         if (walletInitialized) {
             try {
-                walletKit.stopAsync();
+                Logger.logInfoMessage("Waiting for peer group to stop ...");
+                peerGroup.stop();
+                Logger.logInfoMessage("Peer group stopped");
                 peerDiscovery.storePeers();
-                walletKit.awaitTerminated(5000, TimeUnit.MILLISECONDS);
             } catch (IOException exc) {
                 Logger.logErrorMessage("Unable to save TokenExchange peers", exc);
-            } catch (TimeoutException exc) {
-                // Ignored
+            } catch (Exception exc) {
+                Logger.logErrorMessage("Unable to shutdown the Bitcoin wallet", exc);
             }
         }
         Logger.logInfoMessage("Bitcoin wallet stopped");
@@ -240,6 +562,20 @@ public class BitcoinWallet {
      */
     static void propagateContext() {
         Context.propagate(context);
+    }
+
+    /**
+     * Obtain the wallet lock
+     */
+    static void obtainLock() {
+        walletLock.lock();
+    }
+
+    /**
+     * Release the wallet lock
+     */
+    static void releaseLock() {
+        walletLock.unlock();
     }
 
     /**
@@ -275,7 +611,7 @@ public class BitcoinWallet {
      * @return                  Block chain height
      */
     static int getChainHeight() {
-        return wallet.getLastBlockSeenHeight();
+        return blockChain.getBestChainHeight();
     }
 
     /**
@@ -284,8 +620,7 @@ public class BitcoinWallet {
      * @return                  Wallet balance
      */
     static BigDecimal getBalance() {
-        Coin coin = wallet.getBalance(Wallet.BalanceType.ESTIMATED_SPENDABLE);
-        return BigDecimal.valueOf(coin.getValue()).movePointLeft(8).stripTrailingZeros();
+        return BigDecimal.valueOf(walletBalance).movePointLeft(8).stripTrailingZeros();
     }
 
     /**
@@ -298,12 +633,39 @@ public class BitcoinWallet {
     }
 
     /**
-     * Get a new Bitcoin address
+     * Get a new external key
      *
-     * @return                  Bitcoin address
+     * @return                  New key or null
      */
-    static String getNewAddress() {
-        return wallet.freshReceiveAddress().toString();
+    static DeterministicKey getNewKey() {
+        return getNewKey(externalParentKey);
+    }
+
+    /**
+     * Get a new key
+     *
+     * @param   parentKey       Parent key
+     * @return                  New key or null
+     */
+    static DeterministicKey getNewKey(DeterministicKey parentKey) {
+        DeterministicKey key = null;
+        ChildNumber child = TokenDb.getNewChild(parentKey.getChildNumber());
+        if (child != null) {
+            List<ChildNumber> path = HDUtils.append(parentKey.getPath(), child);
+            key = hierarchy.get(path, false, true);
+        }
+        return key;
+    }
+
+    /**
+     * Get an existing key
+     *
+     * @param   parentKey       Parent key
+     * @param   childNumber     Child number
+     */
+    static DeterministicKey getKey(DeterministicKey parentKey, ChildNumber childNumber) {
+        List<ChildNumber> path = HDUtils.append(parentKey.getPath(), childNumber);
+        return hierarchy.get(path, false, true);
     }
 
     /**
@@ -315,12 +677,12 @@ public class BitcoinWallet {
     static boolean validateAddress(String address) {
         boolean isValid = false;
         try {
-            Address.fromBase58(getNetworkParameters(), address);
+            Address.fromBase58(params, address);
             isValid = true;
         } catch (WrongNetworkException exc ) {
-            Logger.logInfoMessage("Bitcoin address " + address + " is for the wrong network");
+            Logger.logDebugMessage("Bitcoin address " + address + " is for the wrong network");
         } catch (AddressFormatException exc) {
-            Logger.logInfoMessage("Bitcoin address " + address + " is not a valid address");
+            Logger.logDebugMessage("Bitcoin address " + address + " is not a valid address");
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to validate Bitcoin address " + address, exc);
         }
@@ -354,42 +716,201 @@ public class BitcoinWallet {
     }
 
     /**
-     * Get a wallet transactions
+     * Get the maximum block chain rollback
      *
-     * @param   hash            Transaction hash
-     * @return                  Transaction or null if not found
+     * @return                  Maximum rollback
      */
-    static Transaction getTransaction(String hash) {
-        return wallet.getTransaction(Sha256Hash.wrap(hash));
+    static int getMaxRollback() {
+        return SPVBlockStore.DEFAULT_NUM_HEADERS;
+    }
+
+    /**
+     * Roll back the block chain
+     *
+     * @param   height          Desired chain height
+     */
+    static boolean rollbackChain(int height) {
+        boolean success = false;
+        try {
+            blockChain.rollback(height);
+            success = true;
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to roll back the Bitcoin block chain", exc);
+        }
+        return success;
     }
 
     /**
      * Send coins to the target address
      *
      * @param   address                     Target Bitcoin address
-     * @param   amount                      Amount to send
+     * @param   coins                       Amount to send (BTC)
      * @return                              Transaction identifier
-     * @throws  IllegalArgumentException    Illegal argument specified
      */
-    static String sendCoins(String address, BigDecimal amount) throws IllegalArgumentException {
-        Transaction tx = null;
-        Coin sendAmount = Coin.valueOf(amount.movePointRight(8).longValue());
-        Address sendAddress = Address.fromBase58(context.getParams(), address);
-        Address changeAddress = Address.fromBase58(context.getParams(), walletAddress);
-        SendRequest sendRequest = SendRequest.to(sendAddress, sendAmount);
-        sendRequest.changeAddress = changeAddress;
-        sendRequest.ensureMinRequiredFee = true;
+    static String sendCoins(String address, BigDecimal coins) {
+        return sendCoins(address, coins, false);
+    }
+
+    /**
+     * Send coins to the target address
+     *
+     * @param   address                     Target Bitcoin address
+     * @param   coins                       Amount to send (BTC)
+     * @param   emptyWallet                 TRUE if this is a request to empty the wallet
+     * @return                              Transaction identifier
+     */
+    static String sendCoins(String address, BigDecimal coins, boolean emptyWallet) {
+        String transactionId = null;
+        Db.db.beginTransaction();
+        obtainLock();
         try {
-            Wallet.SendResult sendResult = wallet.sendCoins(sendRequest);
-            tx = sendResult.tx;
-        } catch (Wallet.DustySendRequested exc) {
-            throw new IllegalArgumentException("Send request for " + amount.toPlainString()
-                    + " BTC results in a dust output");
-        } catch (InsufficientMoneyException exc) {
-            throw new IllegalArgumentException("Insufficient funds to send " + amount.toPlainString()
-                    + " BTC to " + address);
+            Address toAddress = Address.fromBase58(params, address);
+            long amount = emptyWallet ? walletBalance : coins.movePointRight(8).longValue();
+            if (amount < Transaction.MIN_NONDUST_OUTPUT.getValue()) {
+                throw new IllegalArgumentException("Transaction amount is too small");
+            }
+            //
+            // Create the base transaction
+            //
+            Transaction tx = new Transaction(params);
+            TransactionConfidence conf = tx.getConfidence();
+            conf.setSource(TransactionConfidence.Source.SELF);
+            tx.setPurpose(Transaction.Purpose.USER_PAYMENT);
+            tx.setLockTime(getChainHeight());
+            //
+            // Create the outputs
+            //
+            TransactionOutput output1 = new TransactionOutput(params, tx, Coin.valueOf(amount), toAddress);
+            DeterministicKey changeKey = getNewKey(internalParentKey);
+            Address changeAddress = changeKey.toAddress(params);
+            TransactionOutput output2 = new TransactionOutput(params, tx, Coin.ZERO, changeAddress);
+            //
+            // Gather unspent outputs to form the inputs for this transaction
+            //
+            int length = 77;
+            long fee = BigDecimal.valueOf(length, 3).multiply(TokenAddon.bitcoinTxFee).movePointRight(8).longValue();
+            List<TransactionInput> inputs = new ArrayList<>();
+            List<DeterministicKey> keys = new ArrayList<>();
+            List<TransactionOutput> connectedOutputs = new ArrayList<>();
+            List<Script> outScripts = new ArrayList<>();
+            long inputAmount = 0;
+            List<BitcoinUnspent> unspentList = TokenDb.getUnspentOutputs();
+            for (BitcoinUnspent unspent : unspentList) {
+                inputAmount += unspent.getAmount();
+                DeterministicKey parentKey =
+                        unspent.getParentNumber().getI() == 0 ? externalParentKey : internalParentKey;
+                DeterministicKey key = getKey(parentKey, unspent.getChildNumber());
+                keys.add(key);
+                Script outScript = ScriptBuilder.createOutputScript(key.toAddress(params));
+                outScripts.add(outScript);
+                TransactionOutput output = new TransactionOutput(params, null, Coin.valueOf(inputAmount),
+                        outScript.getProgram());
+                connectedOutputs.add(output);
+                Script inScript = ScriptBuilder.createInputScript(null, key);
+                TransactionOutPoint outPoint = new TransactionOutPoint(params, unspent.getIndex(),
+                        Sha256Hash.wrap(unspent.getId()));
+                TransactionInput input = new TransactionInput(params, tx, inScript.getProgram(), outPoint);
+                inputs.add(input);
+                length += 148;
+                fee = BigDecimal.valueOf(length, 3).multiply(TokenAddon.bitcoinTxFee).movePointRight(8).longValue();
+                if (inputAmount >= amount + fee) {
+                    break;
+                }
+            }
+            //
+            // We will deduct the fee from the amount if we are emptying the wallet.  Otherwise,
+            // there must be sufficient funds to cover the requested amount plus the transaction fee.
+            // We will add the change to the transaction fee if the change would result in a dust
+            // output.
+            //
+            long change;
+            if (emptyWallet) {
+                amount -= fee;
+                change = 0;
+                if (amount < Transaction.MIN_NONDUST_OUTPUT.getValue()) {
+                    throw new IllegalArgumentException("Insufficient funds to send " + coins.toPlainString() + " BTC");
+                }
+                output1.setValue(Coin.valueOf(amount));
+            } else {
+                change = inputAmount - amount - fee;
+                if (change < 0) {
+                    throw new IllegalArgumentException("Insufficient funds to send " + coins.toPlainString() + " BTC");
+                }
+                if (change < Transaction.MIN_NONDUST_OUTPUT.getValue()) {
+                    change = 0;
+                }
+            }
+            //
+            // Add the inputs and outputs to the transaction
+            //
+            tx.addOutput(output1);
+            if (change > 0) {
+                output2.setValue(Coin.valueOf(change));
+                tx.addOutput(output2);
+            }
+            for (TransactionInput input : inputs) {
+                tx.addInput(input);
+            }
+            //
+            // Sign the inputs and verify the generated script as a sanity check
+            //
+            int index = 0;
+            for (TransactionInput input : tx.getInputs()) {
+                Script inScript = input.getScriptSig();
+                Script outScript = outScripts.get(index);
+                DeterministicKey key = keys.get(index);
+                TransactionSignature signature = tx.calculateSignature(index, key, outScript,
+                                Transaction.SigHash.ALL, false);
+                inScript = outScript.getScriptSigWithSignature(inScript, signature.encodeToBitcoin(), 0);
+                input.setScriptSig(inScript);
+                input.verify(connectedOutputs.get(index));
+                index++;
+            }
+            //
+            // Update the unspent outputs
+            //
+            List<BitcoinUnspent> usedOutputs = unspentList.subList(0, tx.getInputs().size());
+            for (BitcoinUnspent unspent : usedOutputs) {
+                if (!TokenDb.deleteUnspentOutput(unspent.getId(), unspent.getIndex())) {
+                    throw new IllegalStateException("Unable to delete connected outputs");
+                }
+            }
+            if (change > 0) {
+                BitcoinUnspent changeOutput = new BitcoinUnspent(tx.getHash().getBytes(), 1,
+                        change, getChainHeight(), changeKey.getChildNumber(), internalParentKey.getChildNumber());
+                if (!TokenDb.storeUnspentOutput(changeOutput)) {
+                    throw new IllegalStateException("Unable to store change output");
+                }
+            }
+            //
+            // Broadcast the transaction
+            //
+            if (!TokenDb.storeBroadcastTransaction(tx)) {
+                throw new IllegalStateException("Unable to store broadcast transaction");
+            }
+            peerGroup.broadcastTransaction(tx);
+            //
+            // All is well - commit the transaction
+            //
+            Db.db.commitTransaction();
+            transactionId = tx.getHashAsString();
+            Logger.logInfoMessage("Broadcast Bitcoin transaction " + transactionId + " for "
+                    + BigDecimal.valueOf(amount, 8).toPlainString() + " BTC");
+        } catch (AddressFormatException exc) {
+            Db.db.rollbackTransaction();
+            throw new IllegalArgumentException("Bitcoin address is not valid");
+        } catch (IllegalArgumentException exc) {
+            Db.db.rollbackTransaction();
+            throw exc;
+        } catch (Exception exc) {
+            Db.db.rollbackTransaction();
+            Logger.logErrorMessage("Unable to create send transaction", exc);
+            throw new RuntimeException(exc.getMessage());
+        } finally {
+            releaseLock();
+            Db.db.endTransaction();
         }
-        return tx.getHashAsString();
+        return transactionId;
     }
 
     /**
@@ -397,23 +918,8 @@ public class BitcoinWallet {
      *
      * @param   address                     Target Bitcoin address
      * @return                              Transaction identifier
-     * @throws  IllegalArgumentException    Illegal argument specified
      */
-    static String emptyWallet(String address) throws IllegalArgumentException {
-        Transaction tx = null;
-        Address sendAddress = Address.fromBase58(context.getParams(), address);
-        Coin coin = wallet.getBalance(Wallet.BalanceType.ESTIMATED_SPENDABLE);
-        SendRequest sendRequest = SendRequest.to(sendAddress, coin);
-        sendRequest.emptyWallet = true;
-        sendRequest.ensureMinRequiredFee = true;
-        try {
-            Wallet.SendResult sendResult = wallet.sendCoins(sendRequest);
-            tx = sendResult.tx;
-        } catch (Wallet.DustySendRequested exc) {
-            throw new IllegalArgumentException("Request to empty the wallet results in a dust output");
-        } catch (InsufficientMoneyException exc) {
-            throw new IllegalArgumentException("Insufficient funds available to empty the wallet");
-        }
-        return tx.getHashAsString();
+    static String emptyWallet(String address) {
+        return sendCoins(address, BigDecimal.ZERO, true);
     }
 }

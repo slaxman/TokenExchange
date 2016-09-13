@@ -15,6 +15,8 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import nxt.util.Convert;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
@@ -100,6 +102,15 @@ class BitcoinTransaction {
     }
 
     /**
+     * Get the Bitcoin transaction identifier as a string
+     *
+     * @return                  Transaction identifier string
+     */
+    String getBitcoinTxIdString() {
+        return Convert.toHexString(bitcoinTxId);
+    }
+
+    /**
      * Get the Bitcoin address
      *
      * @return                  Bitcoin address
@@ -169,6 +180,15 @@ class BitcoinTransaction {
      */
     long getAccountId() {
         return accountId;
+    }
+
+    /**
+     * Get the account identifier as a string
+     *
+     * @return                  RS-encoded account identifier
+     */
+    String getAccountIdRS() {
+        return Convert.rsAccount(accountId);
     }
 
     /**

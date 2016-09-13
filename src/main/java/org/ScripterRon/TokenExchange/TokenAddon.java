@@ -43,8 +43,8 @@ import java.util.Properties;
  * in the token exchange database.  When the required number of confirmation have been received,
  * token currency is sent to the associated Nxt account using the token exchange rate.
  *
- * TokenExchange includes a Bitcoin SPV wallet which communicates with one or more Bitcoin
- * servers.  The SPV wallet handles receiving and sending Bitcoins.
+ * TokenExchange includes a Bitcoin wallet which communicates with one or more Bitcoin
+ * servers.
  */
 public class TokenAddon implements AddOn {
 

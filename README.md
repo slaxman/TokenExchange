@@ -1,7 +1,7 @@
-TokenExchange Version 2
+TokenExchange Version 3
 =======================
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  The databases are not compatible between Version 1 and Version 2.  Note that the Version 2 wallet is stored in the NRS database directory.  Be sure to empty the wallet before deleting the NRS database directory or your coins will be lost.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  TokenExchange Version 3 is similar to Version 2 but stores the wallet in SQL tables instead of keeping it in memory.  The TokenExchange databases are not compatible between the different versions.  However, all three versions can co-exist on the same server but only one may be installed at a time.  Note that the Version 2 and Version 3 wallets are stored in the NRS database directory.  Be sure to empty the wallet before deleting the NRS database directory or your coins will be lost.
 
 TokenExchange watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt account, a Bitcoin transaction will be initiated to send the equivalent amount of Bitcoins to the Bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or an encrypted prunable message.
 
@@ -30,7 +30,7 @@ The token-exchange.properties configuration file controls the operation of Token
     This specifies the Bitcoin transaction fee in BTC/KB.  A send request with one input and two outputs is 226 bytes.
     
 - bitcoinServer=host:port    
-    This specifies the Bitcoin server that will be used by the integrated SPV wallet.  A random server will be selected if this field is not specified.
+    A local Bitcoin server will be used if one is found.  If there is no local server, then the server specified by this field will be used.  A set of random servers will be selected if this field is not specified.
 
 
 TokenExchange API
@@ -42,6 +42,9 @@ Nxt transactions represent requests to redeem tokens and send Bitcoins.  Bitcoin
 
 The following functions are available:
   
+  - DeleteAddress    
+    Delete a bitcoin address associated with a Nxt user. Specify 'function=deleteAddress&address=s' in the HTTP request.  Any Bitcoins sent to the address after it has been deleted will be lost.
+    
   - DeleteBitcoinTransaction    
     Delete a Bitcoin transaction.  Specify 'function=deleteBitcoinTransaction&id=string' in the HTTP request.
     
@@ -69,6 +72,9 @@ The following functions are available:
   - Resume    
     Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resume' in the HTTP request.  Pending requests will be processed and normal processing will resume.
   
+  - RollbackChain    
+    Roll back the Bitcoin block chain to the specified height and process transactions again.  Specify 'function=rollbackChain&height=n' in the HTTP request.  This function can be used to recover transactions that are in blocks but were not processed previously.  The request cannot be processed if the desired block is no longer in the block chain cache (the cache holds 5000 blocks and the oldest block is removed when a new block is received).
+    
   - SendBitcoins    
     Send Bitcoins from the SPV wallet.  Specify 'function=sendBitcoins&address=string&amount=number' in the HTTP request.
   
