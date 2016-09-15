@@ -179,7 +179,7 @@ public class BitcoinWallet {
         context = new Context(params);
         try {
             //
-            // Initialize the deterministic keys
+            // Initialize the deterministic key hierarchy
             //
             initKeys();
             //
@@ -216,7 +216,7 @@ public class BitcoinWallet {
                 }
             });
             //
-            // Initialize the network
+            // Initialize the peer network
             //
             initNetwork();
             //
@@ -225,13 +225,15 @@ public class BitcoinWallet {
             peerGroup.start();
             Logger.logInfoMessage("Token Exchange peer group started");
             //
-            // Download the block chain
+            // Download the block chain (this can add transactions to our tables)
             //
             Logger.logInfoMessage("Downloading the block chain");
             peerGroup.downloadBlockChain();
             Logger.logInfoMessage("Block chain download completed");
             //
-            // Broadcast pending transactions
+            // Broadcast pending transactions (we won't wait for completion
+            // and will instead remove the transaction from the table when
+            // it is received in a block)
             //
             List<Transaction> pendingList = TokenDb.getBroadcastTransactions();
             for (Transaction tx : pendingList) {
@@ -239,7 +241,8 @@ public class BitcoinWallet {
             }
             //
             // Wallet initialization completed.  The Nxt transaction listener is
-            // blocked waiting on us, so let it start running now.
+            // blocked waiting on us, so let it start running now.  The TokenExchange
+            // API is now enabled as well.
             //
             walletInitialized = true;
             Logger.logInfoMessage("Bitcoin wallet initialization completed");
@@ -267,7 +270,7 @@ public class BitcoinWallet {
         }
 
         /**
-         * Rollback the block chain
+         * Roll back the block chain
          *
          * @param   height                  Desired height
          * @throws  BlockStoreException     Unable to rollback the block chain
@@ -359,11 +362,11 @@ public class BitcoinWallet {
     }
 
     /**
-     * Initialize the deterministic keys
+     * Initialize the deterministic key hierarchy
      */
     private static void initKeys() {
         //
-        // Initialize the deterministic hierarchy
+        // Create the deterministic hierarchy
         //
         DeterministicSeed seed = TokenDb.getSeed();
         if (seed == null) {
@@ -394,7 +397,8 @@ public class BitcoinWallet {
         List<BitcoinUnspent> unspentList = TokenDb.getUnspentOutputs();
         unspentList.forEach((unspent) -> walletBalance += unspent.getAmount());
         //
-        // Build the set of receive keys
+        // Build the set of receive keys (change keys are not included since
+        // change outputs are stored as soon as they are created)
         //
         List<BitcoinAccount> accounts = TokenDb.getAccounts();
         accounts.forEach((account) -> {
@@ -402,7 +406,8 @@ public class BitcoinWallet {
             receiveAddresses.put(addr, new ReceiveAddress(addr,
                     new ChildNumber(account.getChildNumber()), externalParentKey.getChildNumber()));
         });
-        Logger.logInfoMessage("Wallet address " + walletAddress + ", Balance " + getBalance().toPlainString() + " BTC");
+        Logger.logInfoMessage("Wallet address " + walletAddress
+                + ", Balance " + getBalance().toPlainString() + " BTC");
     }
 
     /**
@@ -490,7 +495,9 @@ public class BitcoinWallet {
         //
         // Process transaction outputs
         //
-        // Our change outputs are not processed since they are already
+        // We support just P2PKH (pay-to-public-key-hash) transactions.
+        //
+        // Our change outputs are ignored since they are already
         // in the unspent transaction output table.
         //
         boolean isRelevant = false;
@@ -519,8 +526,9 @@ public class BitcoinWallet {
                         receiveAddress.getChildNumber(), externalParentKey.getChildNumber());
                 TokenDb.storeUnspentOutput(unspent);
                 walletBalance += amount;
-                Logger.logDebugMessage("Created unspent output " + hash + ":" + index + " for "
-                        + BigDecimal.valueOf(amount, 8).toPlainString() + " BTC");
+                Logger.logInfoMessage("Received Bitcoin transaction " + hash
+                        + " to " + receiveAddress.getAddress() + " for "
+                        + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
             }
         } catch (ScriptException exc) {
             Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + hash
@@ -593,7 +601,7 @@ public class BitcoinWallet {
      * @return                  Network parameters
      */
     static NetworkParameters getNetworkParameters() {
-        return context.getParams();
+        return params;
     }
 
     /**
@@ -787,6 +795,11 @@ public class BitcoinWallet {
             //
             // Gather unspent outputs to form the inputs for this transaction
             //
+            // The unspent outputs are ordered from smallest to largest.  The intent
+            // is to reduce the number of unspent outputs as much as possible.  The
+            // downside is that this can raise transaction fees since the fees are
+            // based on the transaction size.
+            //
             int length = 77;
             long fee = BigDecimal.valueOf(length, 3).multiply(TokenAddon.bitcoinTxFee).movePointRight(8).longValue();
             List<TransactionInput> inputs = new ArrayList<>();
@@ -852,7 +865,8 @@ public class BitcoinWallet {
                 tx.addInput(input);
             }
             //
-            // Sign the inputs and verify the generated script as a sanity check
+            // Sign the inputs and verify the generated script as a sanity check that everything
+            // is correct
             //
             int index = 0;
             for (TransactionInput input : tx.getInputs()) {
@@ -867,7 +881,7 @@ public class BitcoinWallet {
                 index++;
             }
             //
-            // Update the unspent outputs
+            // Delete the unspent outputs that we used for this transaction
             //
             List<BitcoinUnspent> usedOutputs = unspentList.subList(0, tx.getInputs().size());
             for (BitcoinUnspent unspent : usedOutputs) {
@@ -875,6 +889,10 @@ public class BitcoinWallet {
                     throw new IllegalStateException("Unable to delete connected outputs");
                 }
             }
+            //
+            // Add the change output to the unspent outputs now so that it is available
+            // for use by the next send request
+            //
             if (change > 0) {
                 BitcoinUnspent changeOutput = new BitcoinUnspent(tx.getHash().getBytes(), 1,
                         change, getChainHeight(), changeKey.getChildNumber(), internalParentKey.getChildNumber());
@@ -890,12 +908,12 @@ public class BitcoinWallet {
             }
             peerGroup.broadcastTransaction(tx);
             //
-            // All is well - commit the transaction
+            // All is well - commit the database transaction
             //
             Db.db.commitTransaction();
             transactionId = tx.getHashAsString();
             Logger.logInfoMessage("Broadcast Bitcoin transaction " + transactionId + " for "
-                    + BigDecimal.valueOf(amount, 8).toPlainString() + " BTC");
+                    + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
         } catch (AddressFormatException exc) {
             Db.db.rollbackTransaction();
             throw new IllegalArgumentException("Bitcoin address is not valid");

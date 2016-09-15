@@ -101,6 +101,10 @@ public class BitcoinProcessor implements Runnable {
     /**
      * Add a new Bitcoin transaction to the database or update an existing transaction
      *
+     * This method is called each time a transaction is received that has at least one
+     * output referencing one of our account addresses.  We will store the transaction
+     * in the Bitcoin transaction table for later processing.
+     *
      * @param   tx              Transaction
      */
     static void addTransaction(Transaction tx) {
@@ -145,9 +149,6 @@ public class BitcoinProcessor implements Runnable {
                         account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
                 TokenDb.storeTransaction(btx);
-                Logger.logDebugMessage("Received Bitcoin transaction " + hash +
-                        " to " + bitcoinAddress + " for " +
-                        bitcoinAmount.stripTrailingZeros().toPlainString() + " BTC");
             }
         } catch (ScriptException exc) {
             Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + hash
@@ -162,6 +163,10 @@ public class BitcoinProcessor implements Runnable {
 
     /**
      * Process pending Bitcoin transactions
+     *
+     * This method is called each time a new best block (chain head)
+     * is received.  It can be called multiple times for the same chain
+     * height if the block chain is reorganized.
      *
      * @param   block           New best block
      */
@@ -192,7 +197,7 @@ public class BitcoinProcessor implements Runnable {
             return;
         }
         //
-        // Process Bitcoin transactions until stopped
+        // Process Bitcoin transactions until stopped (FALSE is placed on the queue)
         //
         try {
             while (processingQueue.take()) {
@@ -203,15 +208,16 @@ public class BitcoinProcessor implements Runnable {
                 try {
                     Account account = Account.getAccount(TokenAddon.accountId);
                     long nxtBalance = account.getUnconfirmedBalanceNQT();
-                    Account.AccountCurrency currency = Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
+                    Account.AccountCurrency currency =
+                            Account.getAccountCurrency(TokenAddon.accountId, TokenAddon.currencyId);
                     if (currency == null) {
                         TokenAddon.suspend("TokenExchange account " + Convert.rsAccount(TokenAddon.accountId) +
                                 " does not have any " + TokenAddon.currencyCode + " currency");
-                        return;
+                        continue;
                     }
                     long unitBalance = currency.getUnconfirmedUnits();
                     //
-                    // Processing pending Bitcoin transactions
+                    // Process pending Bitcoin transactions
                     //
                     List<BitcoinTransaction> txList =
                             TokenDb.getPendingTransactions(lastSeenHeight - TokenAddon.bitcoinConfirmations);
@@ -223,7 +229,8 @@ public class BitcoinProcessor implements Runnable {
                                     + "to process Bitcoin transaction " + bitcoinTxId);
                             break;
                         }
-                        Attachment attachment = new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
+                        Attachment attachment =
+                                new Attachment.MonetarySystemCurrencyTransfer(TokenAddon.currencyId, units);
                         nxt.Transaction.Builder builder = Nxt.newTransactionBuilder(TokenAddon.publicKey,
                                 0, 0, (short)1440, attachment);
                         builder.recipientId(tx.getAccountId()).timestamp(Nxt.getEpochTime());
@@ -236,12 +243,15 @@ public class BitcoinProcessor implements Runnable {
                         Nxt.getTransactionProcessor().broadcast(transaction);
                         tx.setExchanged(transaction.getId());
                         if (!TokenDb.updateTransaction(tx)) {
-                            throw new RuntimeException("Unable to update transaction in TokenExchange database");
+                            TokenAddon.suspend("Unable to update transaction in TokenExchange database");
+                            break;
                         }
                         nxtBalance -= transaction.getFeeNQT();
                         unitBalance -= units;
-                        Logger.logInfoMessage("Issued " + BigDecimal.valueOf(units, TokenAddon.currencyDecimals).toPlainString()
-                                + " units of " + TokenAddon.currencyCode + " to " + Convert.rsAccount(tx.getAccountId())
+                        Logger.logInfoMessage("Issued "
+                                + BigDecimal.valueOf(units, TokenAddon.currencyDecimals).toPlainString()
+                                + " units of " + TokenAddon.currencyCode + " to "
+                                + Convert.rsAccount(tx.getAccountId())
                                 + ", Transaction " + Long.toUnsignedString(transaction.getId()));
                     }
                 } catch (Exception exc) {
