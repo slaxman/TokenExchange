@@ -55,19 +55,26 @@ public class BitcoinProcessor implements Runnable {
     /**
      * Initialize the Bitcoin processor
      *
+     * @param   delayed                     TRUE if this a delayed initialization
      * @throws  IllegalArgumentException    Processing error occurred
      */
-    static void init() throws IllegalArgumentException {
+    static void init(boolean delayed) throws IllegalArgumentException {
         //
         // Run our Bitcoin processing thread after NRS initialization is completed.
         // Note that the Nxt processing thread will wait until the Bitcoin wallet
         // has been initialized.
         //
-        ThreadPool.runAfterStart(() -> {
+        if (delayed) {
             processingThread = new Thread(new BitcoinProcessor(), "TokenExchange Bitcoin Processor");
             processingThread.setDaemon(true);
             processingThread.start();
-        });
+        } else {
+            ThreadPool.runAfterStart(() -> {
+                processingThread = new Thread(new BitcoinProcessor(), "TokenExchange Bitcoin Processor");
+                processingThread.setDaemon(true);
+                processingThread.start();
+            });
+        }
     }
 
     /**

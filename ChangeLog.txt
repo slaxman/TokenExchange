@@ -4,6 +4,7 @@ TokenExchange Change Log
 Version 3.0.1
   - Update wallet filter when adding/deleting addresses
   - Update wallet balance when sending coins
+  - Delay TokenExchange initialization if Nxt account or currency does not exist
 
 Version 3.0.0
   - Initial release

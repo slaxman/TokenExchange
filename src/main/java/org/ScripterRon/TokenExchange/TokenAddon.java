@@ -16,12 +16,15 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Account;
+import nxt.Block;
+import nxt.BlockchainProcessor;
 import nxt.Currency;
 import nxt.Nxt;
 import nxt.addons.AddOn;
 import nxt.crypto.Crypto;
 import nxt.http.APIServlet;
 import nxt.util.Convert;
+import nxt.util.Listener;
 import nxt.util.Logger;
 
 import java.io.InputStream;
@@ -46,13 +49,16 @@ import java.util.Properties;
  * TokenExchange includes a Bitcoin wallet which communicates with one or more Bitcoin
  * servers.
  */
-public class TokenAddon implements AddOn {
+public class TokenAddon implements AddOn, Listener<Block> {
 
     /** Minimum NRS version */
     private static final int[] MIN_VERSION = new int[] {1, 10, 2};
 
     /** Add-on initialized */
-    private static boolean initialized = false;
+    private static volatile boolean initialized = false;
+
+    /** Add-on initialization delayed */
+    private static volatile boolean delayInitialization = false;
 
     /** Add-on processing suspended */
     private static volatile boolean suspended = false;
@@ -159,47 +165,36 @@ public class TokenAddon implements AddOn {
             currencyCode = getStringProperty(properties, "currency", true);
             Currency currency = Currency.getCurrencyByCode(currencyCode);
             if (currency == null) {
-                throw new IllegalArgumentException("TokenExchange 'currency' property is not a valid currency");
+                Logger.logWarningMessage("TokenExchange 'currency' property is not a valid Nxt currency");
+                delayInitialization = true;
+            } else {
+                currencyId = currency.getId();
+                currencyDecimals = currency.getDecimals();
             }
-            currencyId = currency.getId();
-            currencyDecimals = currency.getDecimals();
             Account account = Account.getAccount(accountId);
             if (account == null) {
-                throw new IllegalArgumentException("TokenExchange account " + accountIdRS + " does not exist");
+                Logger.logWarningMessage("TokenExchange account " + accountIdRS + " does not exist");
+                delayInitialization = true;
             }
-            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
-                    + BigDecimal.valueOf(account.getUnconfirmedBalanceNQT(), 8).toPlainString()
-                    + " NXT");
-            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
-                    + BigDecimal.valueOf(Account.getUnconfirmedCurrencyUnits(accountId, currencyId), currencyDecimals).toPlainString()
-                    + " units of currency " + currencyCode);
             //
             // Initialize the token exchange database
             //
             TokenDb.init();
             //
-            // Initialize the Bitcoin processor
+            // Delay TokenExchange initialization if the Nxt account or currency does not exist yet
             //
-            BitcoinProcessor.init();
-            //
-            // Initialize the Nxt token listener
-            //
-            TokenListener.init();
-            //
-            // Add-on initialization completed
-            //
-            initialized = true;
+            if (delayInitialization) {
+                Logger.logWarningMessage("TokenExchange initialization suspended until Nxt account and currency created");
+                Nxt.getBlockchainProcessor().addListener(this, BlockchainProcessor.Event.BLOCK_PUSHED);
+            } else {
+                finishInitialization(false);
+            }
         } catch (IllegalArgumentException exc) {
             Logger.logErrorMessage(exc.getMessage());
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to intialize the TokenExchange database", exc);
         } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to initialize the TokenExchange", exc);
-        }
-        if (initialized) {
-            Logger.logInfoMessage("TokenExchange initialized");
-        } else {
-            Logger.logInfoMessage("TokenExchange initialization failed");
+            Logger.logErrorMessage("Unable to initialize TokenExchange", exc);
         }
     }
 
@@ -267,15 +262,83 @@ public class TokenAddon implements AddOn {
     }
 
     /**
+     * Wait until the Nxt account and currency have been created
+     *
+     * We will check after each block is processed.  Once the Nxt account
+     * and currency have been created, we will finish the TokenExchange
+     * initialization and start our processing tasks.
+     *
+     * @param   block           Block added to chain
+     */
+    @Override
+    public void notify(Block block) {
+        if (delayInitialization) {
+            delayInitialization = false;
+            boolean nxtSetup = false;
+            Currency currency = Currency.getCurrencyByCode(currencyCode);
+            if (currency != null) {
+                Account account = Account.getAccount(accountId);
+                if (account != null) {
+                    Logger.logInfoMessage("TokenExchange initialization resuming");
+                    nxtSetup = true;
+                    currencyId = currency.getId();
+                    currencyDecimals = currency.getDecimals();
+                    Nxt.getBlockchainProcessor().removeListener(this, BlockchainProcessor.Event.BLOCK_PUSHED);
+                    finishInitialization(true);
+                }
+            }
+            if (!nxtSetup) {
+                delayInitialization = true;
+            }
+        }
+    }
+
+
+    /**
+     * Finish TokenExchange initialization
+     *
+     * @param   delayed         TRUE for delayed initialization
+     */
+    private void finishInitialization(boolean delayed) {
+        try {
+            Account account = Account.getAccount(accountId);
+            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
+                    + BigDecimal.valueOf(account.getUnconfirmedBalanceNQT(), 8).stripTrailingZeros().toPlainString()
+                    + " NXT");
+            Logger.logInfoMessage("TokenExchange account " + accountIdRS + " has "
+                    + BigDecimal.valueOf(Account.getUnconfirmedCurrencyUnits(accountId, currencyId), currencyDecimals).stripTrailingZeros().toPlainString()
+                    + " units of currency " + currencyCode);
+            //
+            // Initialize the Bitcoin processor
+            //
+            BitcoinProcessor.init(delayed);
+            //
+            // Initialize the Nxt token listener
+            //
+            TokenListener.init();
+            //
+            // Add-on initialization completed
+            //
+            initialized = true;
+            Logger.logInfoMessage("TokenExchange initialized");
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to initialize TokenExchange", exc);
+        }
+    }
+
+    /**
      * Shutdown the TokenExchange add-on
      */
     @Override
     public void shutdown() {
-        TokenListener.shutdown();
-        BitcoinProcessor.shutdown();
-        BitcoinWallet.shutdown();
-        initialized = false;
-        Logger.logInfoMessage("TokenExchange shutdown");
+        delayInitialization = false;
+        if (initialized) {
+            TokenListener.shutdown();
+            BitcoinProcessor.shutdown();
+            BitcoinWallet.shutdown();
+            initialized = false;
+        }
+        Logger.logInfoMessage("TokenExchange stopped");
     }
 
     /**
@@ -285,7 +348,7 @@ public class TokenAddon implements AddOn {
      */
     @Override
     public APIServlet.APIRequestHandler getAPIRequestHandler() {
-        return initialized ? new TokenAPI() : null;
+        return new TokenAPI();
     }
 
     /**
