@@ -1,6 +1,10 @@
 TokenExchange Change Log
 =========================
 
+Version 1.4.0
+  - Add package script
+  - Delete existing tables when upgrading the schema
+
 Version 1.3.0
   - Move TokenExchange tables to a separate schema to avoid conflicts
   - Null pointer exception if redemption account does not have currency
