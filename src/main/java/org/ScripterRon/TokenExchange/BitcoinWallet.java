@@ -926,6 +926,7 @@ public class BitcoinWallet {
             // All is well - commit the database transaction
             //
             Db.db.commitTransaction();
+            walletBalance -= amount + fee - change;
             transactionId = tx.getHashAsString();
             Logger.logInfoMessage("Broadcast Bitcoin transaction " + transactionId + " for "
                     + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");

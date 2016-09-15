@@ -3,6 +3,7 @@ TokenExchange Change Log
 
 Version 3.0.1
   - Update wallet filter when adding/deleting addresses
+  - Update wallet balance when sending coins
 
 Version 3.0.0
   - Initial release
