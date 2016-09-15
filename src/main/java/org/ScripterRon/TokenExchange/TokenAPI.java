@@ -321,7 +321,11 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 if (addressString == null) {
                     return missing("address");
                 }
-                response.put("deleted", TokenDb.deleteAccountAddress(addressString));
+                boolean deleted = TokenDb.deleteAccountAddress(addressString);
+                if (deleted) {
+                    BitcoinWallet.removeAddress(addressString);
+                }
+                response.put("deleted", deleted);
                 break;
             case "getBitcoinTransactions":
             case "getTransactions":

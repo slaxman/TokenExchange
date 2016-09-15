@@ -661,6 +661,11 @@ public class BitcoinWallet {
         if (child != null) {
             List<ChildNumber> path = HDUtils.append(parentKey.getPath(), child);
             key = hierarchy.get(path, false, true);
+            if (parentKey == externalParentKey) {
+                Address address = key.toAddress(params);
+                ReceiveAddress receiveAddress = new ReceiveAddress(address, child, parentKey.getChildNumber());
+                receiveAddresses.put(address, receiveAddress);
+            }
         }
         return key;
     }
@@ -674,6 +679,16 @@ public class BitcoinWallet {
     static DeterministicKey getKey(DeterministicKey parentKey, ChildNumber childNumber) {
         List<ChildNumber> path = HDUtils.append(parentKey.getPath(), childNumber);
         return hierarchy.get(path, false, true);
+    }
+
+    /**
+     * Remove an external address
+     *
+     * @param   address         Address string
+     */
+    static void removeAddress(String address) {
+        Address addr = Address.fromBase58(params, address);
+        receiveAddresses.remove(addr);
     }
 
     /**
