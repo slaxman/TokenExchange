@@ -555,6 +555,7 @@ public class BitcoinWallet {
                 Logger.logInfoMessage("Waiting for peer group to stop ...");
                 peerGroup.stop();
                 Logger.logInfoMessage("Peer group stopped");
+                blockStore.close();
                 peerDiscovery.storePeers();
             } catch (IOException exc) {
                 Logger.logErrorMessage("Unable to save TokenExchange peers", exc);
