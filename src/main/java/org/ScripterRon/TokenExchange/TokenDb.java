@@ -55,7 +55,7 @@ public class TokenDb {
     }
 
     /** Database schema name */
-    private static final String DB_SCHEMA = "TOKEN_EXCHANGE_3";
+    private static final String DB_SCHEMA = "TOKEN_EXCHANGE_4";
 
     /** Control table name */
     private static final String CONTROL_TABLE = DB_SCHEMA + ".control";
@@ -112,12 +112,16 @@ public class TokenDb {
     private static final String unspentTableDefinition = "CREATE TABLE IF NOT EXISTS " + UNSPENT_TABLE + " ("
             + "txid BINARY(32) NOT NULL,"           // Transaction identifier
             + "index INT NOT NULL,"                 // Output index
+            + "blkid BINARY(32) NOT NULL,"          // Block identifier
             + "amount BIGINT NOT NULL,"             // Bitcoin amount
             + "child_number INT NOT NULL,"          // Determinstic key child number
             + "parent_number INT NOT NULL,"         // Deterministic key parent number
+            + "spent BOOLEAN NOT NULL,"             // Output has been spent
             + "height INT NOT NULL)";               // Block chain height
-    private static final String unspentIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
-                    + UNSPENT_TABLE + "_idx1 ON " + UNSPENT_TABLE + "(txid,index)";
+    private static final String unspentIndexDefinition1 = "CREATE INDEX IF NOT EXISTS "
+                    + UNSPENT_TABLE + "_idx1 ON " + UNSPENT_TABLE + "(spent,height)";
+    private static final String unspentIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
+                    + UNSPENT_TABLE + "_idx2 ON " + UNSPENT_TABLE + "(txid)";
 
     /** Nxt transaction table definitions */
     private static final String nxtTableDefinition = "CREATE TABLE IF NOT EXISTS " + NXT_TABLE + " ("
@@ -134,14 +138,13 @@ public class TokenDb {
                     + NXT_TABLE + "_idx1 ON " + NXT_TABLE + "(nxt_txid)";
     private static final String nxtIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
                     + NXT_TABLE + "_idx2 ON " + NXT_TABLE + "(exchanged)";
-    private static final String nxtIndexDefinition3 = "CREATE INDEX IF NOT EXISTS "
-                    + NXT_TABLE + "_idx3 ON " + NXT_TABLE + "(height)";
 
     /** Bitcoin transaction table definitions */
     private static final String bitcoinTableDefinition = "CREATE TABLE IF NOT EXISTS " + BITCOIN_TABLE + " ("
             + "height INT NOT NULL,"                // Bitcoin block chain height (0 if not in chain yet)
             + "timestamp INT NOT NULL,"             // Bitcoin transaction timestamp (0 if not in chain yet)
             + "bitcoin_txid BINARY(32) NOT NULL,"   // Bitcoin transaction identifier
+            + "bitcoin_blkid BINARY(32) NOT NULL,"  // Bitcoin block identifier
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
             + "account_id BIGINT NOT NULL,"         // Nxt account identifier
             + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
@@ -152,8 +155,6 @@ public class TokenDb {
                     + BITCOIN_TABLE + "_idx1 ON " + BITCOIN_TABLE + "(bitcoin_txid)";
     private static final String bitcoinIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
                     + BITCOIN_TABLE + "_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
-    private static final String bitcoinIndexDefinition3 = "CREATE INDEX IF NOT EXISTS "
-                    + BITCOIN_TABLE + "_idx3 ON " + BITCOIN_TABLE + "(height)";
 
     /**
      * Nxt transaction table
@@ -248,6 +249,7 @@ public class TokenDb {
                         + TokenAddon.exchangeRate.movePointRight(8).toPlainString() + ",0,1,0)");
                     stmt.execute(unspentTableDefinition);
                     stmt.execute(unspentIndexDefinition1);
+                    stmt.execute(unspentIndexDefinition2);
                     stmt.execute(broadcastTableDefinition);
                     stmt.execute(accountTableDefinition);
                     stmt.execute(accountIndexDefinition1);
@@ -255,11 +257,9 @@ public class TokenDb {
                     stmt.execute(nxtTableDefinition);
                     stmt.execute(nxtIndexDefinition1);
                     stmt.execute(nxtIndexDefinition2);
-                    stmt.execute(nxtIndexDefinition3);
                     stmt.execute(bitcoinTableDefinition);
                     stmt.execute(bitcoinIndexDefinition1);
                     stmt.execute(bitcoinIndexDefinition2);
-                    stmt.execute(bitcoinIndexDefinition3);
                     //
                     // Add new database version processing here
                     //
@@ -444,44 +444,21 @@ public class TokenDb {
     }
 
     /**
-     * Check if an unspent transaction exists
-     *
-     * @param   txid            Transaction identifier
-     * @param   index           Transaction output index
-     * @return                  TRUE if the transaction exists
-     */
-    static boolean unspentOutputExists(byte[] txid, int index) {
-        boolean exists = false;
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + UNSPENT_TABLE
-                        + " WHERE txid=? AND index=?")) {
-            stmt.setBytes(1, txid);
-            stmt.setInt(2, index);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    exists = true;
-                }
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get unspent output from Token Exchange table", exc);
-        }
-        return exists;
-    }
-
-    /**
      * Get an unspent output
      *
      * @param   txid            Transaction identifier
      * @param   index           Transaction output index
+     * @param   blkid           Block identifier
      * @return                  Unspent output or null
      */
-    static BitcoinUnspent getUnspentOutput(byte[] txid, int index) {
+    static BitcoinUnspent getUnspentOutput(byte[] txid, int index, byte[] blkid) {
         BitcoinUnspent unspent = null;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
-                        + " WHERE txid=? AND index=?")) {
+                        + " WHERE txid=? AND index=? AND blkid=?")) {
             stmt.setBytes(1, txid);
             stmt.setInt(2, index);
+            stmt.setBytes(3, blkid);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     unspent = new BitcoinUnspent(rs);
@@ -494,7 +471,7 @@ public class TokenDb {
     }
 
     /**
-     * Get all unspent outputs ordered by amount
+     * Get all active unspent outputs ordered by amount
      *
      * @return                  List of unspent outputs
      */
@@ -502,7 +479,7 @@ public class TokenDb {
         List<BitcoinUnspent> unspentList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
-                        + " ORDER BY amount ASC")) {
+                        + " WHERE spent=false AND height>0 ORDER BY amount ASC")) {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     unspentList.add(new BitcoinUnspent(rs));
@@ -515,7 +492,7 @@ public class TokenDb {
     }
 
     /**
-     * Store an unspent output
+     * Store a new unspent output
      *
      * @param   unspent         Unspent output
      * @return                  TRUE if the output was stored
@@ -524,14 +501,15 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + UNSPENT_TABLE
-                        + " (txid,index,amount,height,child_number,parent_number)"
-                        + " VALUES(?,?,?,?,?,?)")) {
+                        + " (txid,index,blkid,amount,spent,height,child_number,parent_number)"
+                        + " VALUES(?,?,?,?,false,?,?,?)")) {
             stmt.setBytes(1, unspent.getId());
             stmt.setInt(2, unspent.getIndex());
-            stmt.setLong(3, unspent.getAmount());
-            stmt.setInt(4, unspent.getHeight());
-            stmt.setInt(5, unspent.getChildNumber().getI());
-            stmt.setInt(6, unspent.getParentNumber().getI());
+            stmt.setBytes(3, unspent.getBlockId());
+            stmt.setLong(4, unspent.getAmount());
+            stmt.setInt(5, unspent.getHeight());
+            stmt.setInt(6, unspent.getChildNumber().getI());
+            stmt.setInt(7, unspent.getParentNumber().getI());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store unspent output in Token Exchange table", exc);
@@ -540,24 +518,86 @@ public class TokenDb {
     }
 
     /**
-     * Delete an unspent output
+     * Update an unspent output
      *
-     * @param   txid            Transaction identifier
-     * @param   index           Transaction output index
-     * @return                  TRUE if the output was deleted
+     * @param   unspent         Unspent output
+     * @return                  TRUE if the output was updated
      */
-    static boolean deleteUnspentOutput(byte[] txid, int index) {
+    static boolean updateUnspentOutput(BitcoinUnspent unspent) {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + UNSPENT_TABLE
-                        + " WHERE txid=? AND index=?")) {
-            stmt.setBytes(1, txid);
-            stmt.setInt(2, index);
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
+                        + " SET spent=?,height=? WHERE txid=? AND index=? AND blkid=?")) {
+            stmt.setBoolean(1, unspent.isSpent());
+            stmt.setInt(2, unspent.getHeight());
+            stmt.setBytes(3, unspent.getId());
+            stmt.setInt(4, unspent.getIndex());
+            stmt.setBytes(5, unspent.getBlockId());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to delete unspent output from Token Exchange table", exc);
+            Logger.logErrorMessage("Unable to update unspent output in Token Exchange table", exc);
         }
         return count != 0;
+    }
+
+    /**
+     * Deactivate unspent outputs
+     *
+     * @param   height          Deactivate all unspent outputs above this height
+     * @return                  Unspent amount
+     */
+    static long deactivateUnspentOutputs(int height) {
+        long amount = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt1 = conn.prepareStatement("SELECT SUM(amount) AS amount FROM " + UNSPENT_TABLE
+                        + " WHERE spent=false AND height>? AND parent_number=0");
+                PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
+                        + " SET height=0 WHERE spent=false AND height>?")) {
+            stmt1.setInt(1, height);
+            try (ResultSet rs = stmt1.executeQuery()) {
+                if (rs.next()) {
+                    amount = rs.getLong("amount");
+                }
+            }
+            if (amount != 0) {
+                stmt2.setInt(1, height);
+                stmt2.executeUpdate();
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to deactivate unspent outputs in Token Exchange table", exc);
+        }
+        return amount;
+    }
+
+    /**
+     * Activate unspent outputs
+     *
+     * @param   blkid           Activate all unspent outputs for this block
+     * @param   height          Activation height
+     * @return                  Unspent amount
+     */
+    static long activateUnspentOutputs(byte[] blkid, int height) {
+        long amount = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt1 = conn.prepareStatement("SELECT SUM(amount) AS amount FROM " + UNSPENT_TABLE
+                        + " WHERE spent=false AND blkid=?");
+                PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
+                        + " SET height=? WHERE spent=false AND blkid=?")) {
+            stmt1.setBytes(1, blkid);
+            try (ResultSet rs = stmt1.executeQuery()) {
+                if (rs.next()) {
+                    amount = rs.getLong("amount");
+                }
+            }
+            if (amount != 0) {
+                stmt2.setInt(1, height);
+                stmt2.setBytes(2, blkid);
+                stmt2.executeUpdate();
+            }
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to activate unspent outputs ind Token Exchange table", exc);
+        }
+        return amount;
     }
 
     /**
@@ -927,16 +967,17 @@ public class TokenDb {
         int count = 0;
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BITCOIN_TABLE
-                        + " (bitcoin_txid,height,timestamp,bitcoin_address,bitcoin_amount,"
+                        + " (bitcoin_txid,bitcoin_blkid,height,timestamp,bitcoin_address,bitcoin_amount,"
                         + "  token_amount,account_id,exchanged,nxt_txid)"
-                        + " VALUES(?,?,?,?,?,?,?,false,0)")) {
+                        + " VALUES(?,?,?,?,?,?,?,?,false,0)")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
-            stmt.setInt(2, tx.getHeight());
-            stmt.setInt(3, tx.getTimestamp());
-            stmt.setString(4, tx.getBitcoinAddress());
-            stmt.setLong(5, tx.getBitcoinAmount());
-            stmt.setLong(6, tx.getTokenAmount());
-            stmt.setLong(7, tx.getAccountId());
+            stmt.setBytes(2, tx.getBitcoinBlockId());
+            stmt.setInt(3, tx.getHeight());
+            stmt.setInt(4, tx.getTimestamp());
+            stmt.setString(5, tx.getBitcoinAddress());
+            stmt.setLong(6, tx.getBitcoinAmount());
+            stmt.setLong(7, tx.getTokenAmount());
+            stmt.setLong(8, tx.getAccountId());
             count = stmt.executeUpdate();
         } catch (SQLException exc) {
             Logger.logErrorMessage("Unable to store Bitcoin transaction in TokenExchange table", exc);
@@ -968,28 +1009,6 @@ public class TokenDb {
     }
 
     /**
-     * See if a Bitcoin transaction exists
-     *
-     * @param   id              Transaction identifier
-     * @return                  TRUE if the Bitcoin transaction exists
-     */
-    static boolean transactionExists(byte[] id) {
-        boolean exists = false;
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE + " WHERE bitcoin_txid=?")) {
-            stmt.setBytes(1, id);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    exists = true;
-                }
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to check Bitcoin transaction in TokenExchange table", exc);
-        }
-        return exists;
-    }
-
-    /**
      * See if a Bitcoin transaction exists for the specified address
      *
      * @param   address         Bitcoin address
@@ -998,7 +1017,8 @@ public class TokenDb {
     static boolean transactionExists(String address) {
         boolean exists = false;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE + " WHERE bitcoin_address=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE
+                        + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -1015,13 +1035,16 @@ public class TokenDb {
      * Get a Bitcoin transaction
      *
      * @param   txid            Bitcoin transaction identifier
+     * @param   blkid           Bitcoin block identifier
      * @return                  Bitcoin transaction or null
      */
-    static BitcoinTransaction getTransaction(byte[] txid) {
+    static BitcoinTransaction getTransaction(byte[] txid, byte[] blkid) {
         BitcoinTransaction tx = null;
         try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE + " WHERE bitcoin_txid=?")) {
+                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
+                        + " WHERE bitcoin_txid=? AND bitcoin_blkid=?")) {
             stmt.setBytes(1, txid);
+            stmt.setBytes(2, blkid);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     tx = new BitcoinTransaction(rs);
@@ -1074,7 +1097,7 @@ public class TokenDb {
         List<BitcoinTransaction> txList = new ArrayList<>();
         try (Connection conn = Db.db.getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
-                        + " WHERE exchanged=false AND height<=? ORDER BY height ASC")) {
+                        + " WHERE exchanged=false AND height<=? AND height>0 ORDER BY height ASC")) {
             stmt.setInt(1, height);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -1106,5 +1129,45 @@ public class TokenDb {
             Logger.logErrorMessage("Unable to delete Bitcoin transaction from TokenExchange table", exc);
         }
         return count != 0;
+    }
+
+    /**
+     * Deactivate Bitcoin transactions
+     *
+     * @param   height          Deactivate all transactions above this height
+     * @return                  Number of transactions updated
+     */
+    static int deactivateTransactions(int height) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
+                        + " SET height=0 WHERE exchanged=false AND height>?")) {
+            stmt.setInt(1, height);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to deactivate Bitcoin transactions in Token Exchange table", exc);
+        }
+        return count;
+    }
+
+    /**
+     * Activate Bitcoin transactions
+     *
+     * @param   blkid           Activate all transactions for this block
+     * @param   height          Activation height
+     * @return                  Number of transactions updated
+     */
+    static int activateTransactions(byte[] blkid, int height) {
+        int count = 0;
+        try (Connection conn = Db.db.getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
+                        + " SET height=? WHERE exchanged=false AND bitcoin_blkid=?")) {
+            stmt.setInt(1, height);
+            stmt.setBytes(2, blkid);
+            count = stmt.executeUpdate();
+        } catch (SQLException exc) {
+            Logger.logErrorMessage("Unable to activate Bitcoin transactions in Token Exchange table", exc);
+        }
+        return count;
     }
 }

@@ -1,9 +1,9 @@
-TokenExchange Version 3
+TokenExchange Version 4
 =======================
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 1 uses a local Bitcoin Core server to send and receive Bitcoins.  TokenExchange Version 2 uses an integrated SPV wallet to send and receive Bitcoins and does not require a local Bitcoin Core server.  TokenExchange Version 3 is similar to Version 2 but stores the wallet in SQL tables instead of keeping it in memory.  The TokenExchange databases are not compatible between the different versions.  However, all three versions can co-exist on the same server but only one may be installed at a time.  Note that the Version 2 and Version 3 wallets are stored in the NRS database directory.  Be sure to empty the wallet before deleting the NRS database directory or your coins will be lost.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 4 stores the Bitcoin wallet in SQL tables.  TokenExchange uses the NRS database support, so be sure to empty the Bitcoin wallet before deleting the NRS database directory or your coins will be lost.
 
-TokenExchange watches for transfer transactions of the specified currency.  If the transfer is to the redemption Nxt account, a Bitcoin transaction will be initiated to send the equivalent amount of Bitcoins to the Bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or an encrypted prunable message.
+TokenExchange watches for currency transfer transactions for the specified currency.  If the transfer is to the redemption Nxt account, a Bitcoin transaction will be initiated to send the equivalent amount of Bitcoins to the Bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or encrypted prunable message.
 
 TokenExchange watches for Bitcoins sent to a Bitcoin address that has been associated with a Nxt account.  The Bitcoin transaction must be P2PKH (pay to public key hash).  A Nxt transaction will be initiated to send the equivalent amount of currency units to the associated Nxt account.
 

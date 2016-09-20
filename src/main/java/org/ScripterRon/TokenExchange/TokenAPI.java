@@ -328,7 +328,6 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 response.put("deleted", deleted);
                 break;
             case "getBitcoinTransactions":
-            case "getTransactions":
                 JSONArray txArray = new JSONArray();
                 addressString = Convert.emptyToNull(req.getParameter("address"));
                 heightString = Convert.emptyToNull(req.getParameter("height"));
@@ -351,6 +350,7 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 txList.forEach((tx) -> {
                     JSONObject txJSON = new JSONObject();
                     txJSON.put("bitcoinTxId", tx.getBitcoinTxIdString());
+                    txJSON.put("bitcoinBlockId", tx.getBitcoinBlockIdString());
                     txJSON.put("bitcoinChainHeight", tx.getHeight());
                     txJSON.put("timestamp", tx.getTimestamp());
                     txJSON.put("address", tx.getBitcoinAddress());

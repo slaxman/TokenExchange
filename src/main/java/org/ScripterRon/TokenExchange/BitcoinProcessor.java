@@ -113,24 +113,22 @@ public class BitcoinProcessor implements Runnable {
      * in the Bitcoin transaction table for later processing.
      *
      * @param   tx              Transaction
+     * @param   block           Block containing the transaction
+     * @param   height          Chain height or 0 if not in the chain
      */
-    static void addTransaction(Transaction tx) {
-        Sha256Hash hash = tx.getHash();
+    static void addTransaction(Transaction tx, StoredBlock block, int height) {
+        Sha256Hash txHash = tx.getHash();
+        Sha256Hash blockHash = block.getHeader().getHash();
         obtainLock();
         try {
-            TransactionConfidence confidence = tx.getConfidence();
-            if (confidence.getConfidenceType() != TransactionConfidence.ConfidenceType.BUILDING) {
-                return;
-            }
-            int height = confidence.getAppearedAtChainHeight();
             int timestamp = Nxt.getEpochTime();
-            BitcoinTransaction btx = TokenDb.getTransaction(hash.getBytes());
+            BitcoinTransaction btx = TokenDb.getTransaction(txHash.getBytes(), blockHash.getBytes());
             //
             // Update an existing transaction (this can happen if the block chain
             // is reorganized)
             //
             if (btx != null) {
-                btx.setHeight(confidence.getAppearedAtChainHeight());
+                btx.setHeight(height);
                 TokenDb.updateTransaction(btx);
                 return;
             }
@@ -141,7 +139,7 @@ public class BitcoinProcessor implements Runnable {
             for (TransactionOutput output : outputs) {
                 Address address = output.getAddressFromP2PKHScript(BitcoinWallet.getNetworkParameters());
                 if (address == null) {
-                    Logger.logErrorMessage("Bitcoin transaction " + hash + " is not P2PKH, "
+                    Logger.logErrorMessage("Bitcoin transaction " + txHash + " is not P2PKH, "
                             + "transaction ignored");
                     return;
                 }
@@ -152,16 +150,17 @@ public class BitcoinProcessor implements Runnable {
                 }
                 BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
                 BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                btx = new BitcoinTransaction(hash.getBytes(), height, timestamp, bitcoinAddress,
+                btx = new BitcoinTransaction(txHash.getBytes(), blockHash.getBytes(), height,
+                        timestamp, bitcoinAddress,
                         account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
                 TokenDb.storeTransaction(btx);
             }
         } catch (ScriptException exc) {
-            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + hash
+            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + txHash
                     + ", transaction ignored", exc);
         } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to process Bitcoin transaction " + hash
+            Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash
                     + ", transaction ignored", exc);
         } finally {
             releaseLock();

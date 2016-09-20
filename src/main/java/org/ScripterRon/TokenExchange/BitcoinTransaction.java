@@ -28,6 +28,9 @@ class BitcoinTransaction {
     /** Bitcoin transaction identifier */
     private final byte[] bitcoinTxId;
 
+    /** Bitcoin block identifier */
+    private final byte[] bitcoinBlockId;
+
     /** Bitcoin address */
     private final String bitcoinAddress;
 
@@ -56,6 +59,7 @@ class BitcoinTransaction {
      * Create a Bitcoin transaction
      *
      * @param   bitcoinTxId     Bitcoin transaction identifier
+     * @param   bitcoinBlockId  Bitcoin block identifier
      * @param   height          Bitcoin block height
      * @param   timestamp       Bitcoin transaction timestamp
      * @param   bitcoinAddress  Bitcoin address
@@ -63,9 +67,10 @@ class BitcoinTransaction {
      * @param   bitcoinAmount   Bitcoin transaction amount
      * @param   tokenAmount     Token units
      */
-    BitcoinTransaction(byte[] bitcoinTxId, int height, int timestamp, String bitcoinAddress, long accountId,
-                                long bitcoinAmount, long tokenAmount) {
+    BitcoinTransaction(byte[] bitcoinTxId, byte[] bitcoinBlockId, int height, int timestamp, String bitcoinAddress,
+            long accountId, long bitcoinAmount, long tokenAmount) {
         this.bitcoinTxId = bitcoinTxId;
+        this.bitcoinBlockId = bitcoinBlockId;
         this.height = height;
         this.timestamp = timestamp;
         this.bitcoinAddress = bitcoinAddress;
@@ -82,6 +87,7 @@ class BitcoinTransaction {
      */
     BitcoinTransaction(ResultSet rs) throws SQLException {
         this.bitcoinTxId = rs.getBytes("bitcoin_txid");
+        this.bitcoinBlockId = rs.getBytes("bitcoin_blkid");
         this.height = rs.getInt("height");
         this.timestamp = rs.getInt("timestamp");
         this.bitcoinAddress = rs.getString("bitcoin_address");
@@ -108,6 +114,24 @@ class BitcoinTransaction {
      */
     String getBitcoinTxIdString() {
         return Convert.toHexString(bitcoinTxId);
+    }
+
+    /**
+     * Get the Bitcoin block identifier
+     *
+     * @return                  Bitcoin block identifier
+     */
+    byte[] getBitcoinBlockId() {
+        return bitcoinBlockId;
+    }
+
+    /**
+     * Get the Bitcoin block identifier as a string
+     *
+     * @return                  Block identifier string
+     */
+    String getBitcoinBlockIdString() {
+        return Convert.toHexString(bitcoinBlockId);
     }
 
     /**

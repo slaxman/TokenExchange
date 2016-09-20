@@ -33,8 +33,14 @@ class BitcoinUnspent {
     /** Transaction output index */
     private final int index;
 
+    /** Block identifier */
+    private final byte[] blkid;
+
     /** Bitcoin amount */
     private final long amount;
+
+    /** Output has been spent */
+    private boolean spent;
 
     /** Block chain height */
     private int height;
@@ -50,15 +56,19 @@ class BitcoinUnspent {
      *
      * @param   txid            Transaction identifier
      * @param   index           Transaction output index
+     * @param   blkid           Block identifier
      * @param   amount          Bitcoin amount
      * @param   height          Block chain height
      * @param   childNumber     Receiving address child number
      * @param   parentNumber    Receiving address parent number
      */
-    BitcoinUnspent(byte[] txid, int index, long amount, int height, ChildNumber childNumber, ChildNumber parentNumber) {
+    BitcoinUnspent(byte[] txid, int index, byte[] blkid, long amount, int height,
+            ChildNumber childNumber, ChildNumber parentNumber) {
         this.txid = txid;
         this.index = index;
+        this.blkid = blkid;
         this.amount = amount;
+        this.spent = false;
         this.height = height;
         this.childNumber = childNumber;
         this.parentNumber = parentNumber;
@@ -73,7 +83,9 @@ class BitcoinUnspent {
     BitcoinUnspent(ResultSet rs) throws SQLException {
         this.txid = rs.getBytes("txid");
         this.index = rs.getInt("index");
+        this.blkid = rs.getBytes("blkid");
         this.amount = rs.getLong("amount");
+        this.spent = rs.getBoolean("spent");
         this.height = rs.getInt("height");
         this.childNumber = new ChildNumber(rs.getInt("child_number"));
         this.parentNumber = new ChildNumber(rs.getInt("parent_number"));
@@ -107,12 +119,39 @@ class BitcoinUnspent {
     }
 
     /**
+     * Get the block identifier
+     *
+     * @return                  Block identifier
+     */
+    byte[] getBlockId() {
+        return blkid;
+    }
+
+    /**
      * Get the transaction amount
      *
      * @return                  Transaction amount (Satoshis)
      */
     long getAmount() {
         return amount;
+    }
+
+    /**
+     * Check if the output has been spent
+     *
+     * @return                  TRUE if the output has been spent
+     */
+    boolean isSpent() {
+        return spent;
+    }
+
+    /**
+     * Set output spent status
+     *
+     * @param   spent           TRUE if the output has been spent
+     */
+    void setSpent(boolean spent) {
+        this.spent = spent;
     }
 
     /**

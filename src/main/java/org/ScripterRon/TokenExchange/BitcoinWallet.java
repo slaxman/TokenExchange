@@ -77,6 +77,9 @@ public class BitcoinWallet {
     /** Maximum number of peer connections */
     private static final int MAX_CONNECTIONS = 8;
 
+    /** Dummy block used for change outputs */
+    private static final byte[] dummyBlock = new byte[32];
+
     /** Wallet initialized */
     private static volatile boolean walletInitialized = false;
 
@@ -214,6 +217,11 @@ public class BitcoinWallet {
                     propagateContext();
                     processTransaction(tx, block, blockType, relativeOffset);
                 }
+            });
+            blockChain.addReorganizeListener(Threading.SAME_THREAD, (splitPoint, oldBlocks, newBlocks) -> {
+                propagateContext();
+                Logger.logInfoMessage("Processing Bitcoin block chain fork at height " + splitPoint.getHeight());
+                processReorganization(splitPoint, newBlocks);
             });
             //
             // Initialize the peer network
@@ -471,6 +479,48 @@ public class BitcoinWallet {
     }
 
     /**
+     * Process block chain reorganization
+     *
+     * We have already been notified of the blocks in the side chain which is causing the reorganization.
+     * So we just need to deactivate the transactions in the old blocks and then activate the
+     * transactions in the new blocks.
+     *
+     * @param   splitPoint      Common block between the old and new chains
+     * @param   newBlocks       List of blocks in the new fork (highest to lowest height)
+     */
+    private static void processReorganization(StoredBlock splitPoint, List<StoredBlock> newBlocks) {
+        Db.db.beginTransaction();
+        obtainLock();
+        try {
+            //
+            // Deactivate transactions in the old fork
+            //
+            int splitHeight = splitPoint.getHeight();
+            walletBalance -= TokenDb.deactivateUnspentOutputs(splitHeight);
+            TokenDb.deactivateTransactions(splitHeight);
+            //
+            // Activate transactions in the new fork
+            //
+            for (StoredBlock block : newBlocks) {
+                Sha256Hash hash = block.getHeader().getHash();
+                int height = block.getHeight();
+                walletBalance += TokenDb.activateUnspentOutputs(hash.getBytes(), height);
+                TokenDb.activateTransactions(hash.getBytes(), height);
+            }
+            //
+            // Commit the database transaction
+            //
+            Db.db.commitTransaction();;
+        } catch (Exception exc) {
+            Db.db.rollbackTransaction();
+            Logger.logErrorMessage("Unable to process Bitcoin block chain fork at height " + splitPoint.getHeight(), exc);
+        } finally {
+            releaseLock();
+            Db.db.endTransaction();
+        }
+    }
+
+    /**
      * Process a new transaction
      *
      * @param   tx              Transaction
@@ -480,18 +530,23 @@ public class BitcoinWallet {
      */
     private static void processTransaction(Transaction tx, StoredBlock block,
                                 BlockChain.NewBlockType blockType, int offset) {
-        Sha256Hash hash = tx.getHash();
-        if (blockType != BlockChain.NewBlockType.BEST_CHAIN) {
-            return;
-        }
+        Sha256Hash txHash = tx.getHash();
+        Sha256Hash blockHash = block.getHeader().getHash();
         TransactionConfidence confidence = tx.getConfidence();
         confidence.setSource(TransactionConfidence.Source.NETWORK);
-        confidence.setConfidenceType(TransactionConfidence.ConfidenceType.BUILDING);
-        confidence.setAppearedAtChainHeight(block.getHeight());
+        int height;
+        if (blockType == BlockChain.NewBlockType.BEST_CHAIN) {
+            height = block.getHeight();
+            confidence.setConfidenceType(TransactionConfidence.ConfidenceType.BUILDING);
+            confidence.setAppearedAtChainHeight(height);
+        } else {
+            height = 0;
+            confidence.setConfidenceType(TransactionConfidence.ConfidenceType.PENDING);
+        }
         //
         // Remove transaction from broadcast table if it is one of ours
         //
-        TokenDb.deleteBroadcastTransaction(hash.getBytes());
+        TokenDb.deleteBroadcastTransaction(txHash.getBytes());
         //
         // Process transaction outputs
         //
@@ -515,26 +570,33 @@ public class BitcoinWallet {
                 if (receiveAddress == null) {
                     continue;
                 }
-                if (TokenDb.unspentOutputExists(hash.getBytes(), index)) {
+                BitcoinUnspent unspent = TokenDb.getUnspentOutput(txHash.getBytes(), index, blockHash.getBytes());
+                if (unspent != null) {
+                    if (!unspent.isSpent()) {
+                        unspent.setHeight(height);
+                        TokenDb.updateUnspentOutput(unspent);
+                    }
                     continue;
                 }
                 if (!receiveAddress.getAddress().equals(walletAddress)) {
                     isRelevant = true;
                 }
                 long amount = output.getValue().getValue();
-                BitcoinUnspent unspent = new BitcoinUnspent(hash.getBytes(), index, amount, block.getHeight(),
+                unspent = new BitcoinUnspent(txHash.getBytes(), index, blockHash.getBytes(), amount, height,
                         receiveAddress.getChildNumber(), externalParentKey.getChildNumber());
                 TokenDb.storeUnspentOutput(unspent);
-                walletBalance += amount;
-                Logger.logInfoMessage("Received Bitcoin transaction " + hash
+                if (height > 0) {
+                    walletBalance += amount;
+                    Logger.logInfoMessage("Received Bitcoin transaction " + txHash
                         + " to " + receiveAddress.getAddress() + " for "
                         + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
+                }
             }
         } catch (ScriptException exc) {
-            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + hash
+            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + txHash
                     + ", transaction ignored", exc);
         } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to process Bitcoin transaction " + hash + ", transaction ignored", exc);
+            Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash + ", transaction ignored", exc);
         } finally {
             releaseLock();
         }
@@ -542,7 +604,7 @@ public class BitcoinWallet {
         // Process an account transaction
         //
         if (isRelevant) {
-            BitcoinProcessor.addTransaction(tx);
+            BitcoinProcessor.addTransaction(tx, block, height);
         }
     }
 
@@ -897,12 +959,13 @@ public class BitcoinWallet {
                 index++;
             }
             //
-            // Delete the unspent outputs that we used for this transaction
+            // Update the outputs that we used for this transaction
             //
             List<BitcoinUnspent> usedOutputs = unspentList.subList(0, tx.getInputs().size());
             for (BitcoinUnspent unspent : usedOutputs) {
-                if (!TokenDb.deleteUnspentOutput(unspent.getId(), unspent.getIndex())) {
-                    throw new IllegalStateException("Unable to delete connected outputs");
+                unspent.setSpent(true);
+                if (!TokenDb.updateUnspentOutput(unspent)) {
+                    throw new IllegalStateException("Unable to mark connected outputs as spent");
                 }
             }
             //
@@ -910,7 +973,7 @@ public class BitcoinWallet {
             // for use by the next send request
             //
             if (change > 0) {
-                BitcoinUnspent changeOutput = new BitcoinUnspent(tx.getHash().getBytes(), 1,
+                BitcoinUnspent changeOutput = new BitcoinUnspent(tx.getHash().getBytes(), 1, dummyBlock,
                         change, getChainHeight(), changeKey.getChildNumber(), internalParentKey.getChildNumber());
                 if (!TokenDb.storeUnspentOutput(changeOutput)) {
                     throw new IllegalStateException("Unable to store change output");
