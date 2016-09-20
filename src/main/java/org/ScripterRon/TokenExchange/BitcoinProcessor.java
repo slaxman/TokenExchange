@@ -30,9 +30,9 @@ import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionOutput;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Interface between NRS and the Bitcoin server
@@ -41,9 +41,6 @@ public class BitcoinProcessor implements Runnable {
 
     /** Processing thread */
     private static Thread processingThread;
-
-    /** Bitcoin processing lock */
-    private static final ReentrantLock processingLock = new ReentrantLock();
 
     /** Processing queue */
     private static final LinkedBlockingQueue<Boolean> processingQueue = new LinkedBlockingQueue<>();
@@ -91,71 +88,47 @@ public class BitcoinProcessor implements Runnable {
     }
 
     /**
-     * Obtain the Bitcoin processor lock
-     */
-    static void obtainLock() {
-        processingLock.lock();
-    }
-
-    /**
-     * Release the Bitcoin processor lock
-     */
-    static void releaseLock() {
-        processingLock.unlock();
-    }
-
-    /**
      * Add a new Bitcoin transaction to the database or update an existing transaction
      *
      * This method is called each time a transaction is received that has at least one
      * output referencing one of our account addresses.  We will store the transaction
      * in the Bitcoin transaction table for later processing.
      *
+     * A database transaction has been started when this method is called and any
+     * database updates will be rolled back if an error occurs.  The caller holds
+     * the wallet lock.
+     *
      * @param   tx              Transaction
      * @param   block           Block containing the transaction
      * @param   height          Chain height or 0 if not in the chain
+     * @throws  ScriptException Transaction script error occurred
+     * @throws  SQLException    Database error occurred
      */
-    static void addTransaction(Transaction tx, StoredBlock block, int height) {
+    static void addTransaction(Transaction tx, StoredBlock block, int height) throws ScriptException, SQLException {
         Sha256Hash txHash = tx.getHash();
         Sha256Hash blockHash = block.getHeader().getHash();
-        obtainLock();
-        try {
-            int timestamp = Nxt.getEpochTime();
-            if (TokenDb.transactionExists(txHash.getBytes(), blockHash.getBytes())) {
-                return;
+        if (TokenDb.transactionExists(txHash.getBytes(), blockHash.getBytes())) {
+            return;
+        }
+        int timestamp = Nxt.getEpochTime();
+        List<TransactionOutput> outputs = tx.getOutputs();
+        for (TransactionOutput output : outputs) {
+            Address address = output.getAddressFromP2PKHScript(BitcoinWallet.getNetworkParameters());
+            if (address == null) {
+                throw new ScriptException("Bitcoin transaction " + txHash + " is not P2PKH, transaction ignored");
             }
-            //
-            // Add a new transaction
-            //
-            List<TransactionOutput> outputs = tx.getOutputs();
-            for (TransactionOutput output : outputs) {
-                Address address = output.getAddressFromP2PKHScript(BitcoinWallet.getNetworkParameters());
-                if (address == null) {
-                    Logger.logErrorMessage("Bitcoin transaction " + txHash + " is not P2PKH, "
-                            + "transaction ignored");
-                    return;
-                }
-                String bitcoinAddress = address.toBase58();
-                BitcoinAccount account = TokenDb.getAccount(bitcoinAddress);
-                if (account == null) {
-                    continue;
-                }
-                BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
-                BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                BitcoinTransaction btx = new BitcoinTransaction(txHash.getBytes(), blockHash.getBytes(),
-                        height, timestamp, bitcoinAddress,
-                        account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
-                        tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
-                TokenDb.storeTransaction(btx);
+            String bitcoinAddress = address.toBase58();
+            BitcoinAccount account = TokenDb.getAccount(bitcoinAddress);
+            if (account == null) {
+                continue;
             }
-        } catch (ScriptException exc) {
-            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + txHash
-                    + ", transaction ignored", exc);
-        } catch (Exception exc) {
-            Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash
-                    + ", transaction ignored", exc);
-        } finally {
-            releaseLock();
+            BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
+            BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
+            BitcoinTransaction btx = new BitcoinTransaction(txHash.getBytes(), blockHash.getBytes(),
+                    height, timestamp, bitcoinAddress,
+                    account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
+                    tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
+            TokenDb.storeTransaction(btx);
         }
     }
 
@@ -202,7 +175,7 @@ public class BitcoinProcessor implements Runnable {
                 if (TokenAddon.isSuspended()) {
                     continue;
                 }
-                obtainLock();
+                BitcoinWallet.obtainLock();
                 try {
                     Account account = Account.getAccount(TokenAddon.accountId);
                     long nxtBalance = account.getUnconfirmedBalanceNQT();
@@ -240,10 +213,7 @@ public class BitcoinProcessor implements Runnable {
                         }
                         Nxt.getTransactionProcessor().broadcast(transaction);
                         tx.setExchanged(transaction.getId());
-                        if (!TokenDb.updateTransaction(tx)) {
-                            TokenAddon.suspend("Unable to update transaction in TokenExchange database");
-                            break;
-                        }
+                        TokenDb.updateTransaction(tx);
                         nxtBalance -= transaction.getFeeNQT();
                         unitBalance -= units;
                         Logger.logInfoMessage("Issued "
@@ -256,7 +226,7 @@ public class BitcoinProcessor implements Runnable {
                     Logger.logErrorMessage("Unable to process Bitcoin transactions", exc);
                     TokenAddon.suspend("Unable to process Bitcoin transactions");
                 } finally {
-                    releaseLock();
+                    BitcoinWallet.releaseLock();
                 }
             }
             Logger.logInfoMessage("TokenExchange Bitcoin processor stopped");

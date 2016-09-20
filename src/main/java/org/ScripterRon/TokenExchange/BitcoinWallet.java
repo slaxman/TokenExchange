@@ -16,7 +16,6 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Constants;
-import nxt.Db;
 import nxt.Nxt;
 import nxt.util.Logger;
 
@@ -61,6 +60,7 @@ import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.security.SecureRandom;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -371,8 +371,10 @@ public class BitcoinWallet {
 
     /**
      * Initialize the deterministic key hierarchy
+     *
+     * @throws  SQLException    Database error occurred
      */
-    private static void initKeys() {
+    private static void initKeys() throws SQLException {
         //
         // Create the deterministic hierarchy
         //
@@ -380,9 +382,7 @@ public class BitcoinWallet {
         if (seed == null) {
             seed = new DeterministicSeed(new SecureRandom(), DeterministicSeed.DEFAULT_SEED_ENTROPY_BITS,
                     "", System.currentTimeMillis()/1000);
-            if (!TokenDb.storeSeed(seed)) {
-                throw new IllegalStateException("Unable to store the new seed");
-            }
+            TokenDb.storeSeed(seed);
         }
         rootKey = HDKeyDerivation.createMasterPrivateKey(seed.getSeedBytes());
         rootKey.setCreationTimeSeconds(seed.getCreationTimeSeconds());
@@ -420,8 +420,10 @@ public class BitcoinWallet {
 
     /**
      * Initialize the network
+     *
+     * @throws  SQLException    Database error occurred
      */
-    private static void initNetwork() {
+    private static void initNetwork() throws SQLException {
         //
         // Create the peer group
         //
@@ -489,7 +491,7 @@ public class BitcoinWallet {
      * @param   newBlocks       List of blocks in the new fork (highest to lowest height)
      */
     private static void processReorganization(StoredBlock splitPoint, List<StoredBlock> newBlocks) {
-        Db.db.beginTransaction();
+        TokenDb.beginTransaction();
         obtainLock();
         try {
             //
@@ -510,13 +512,18 @@ public class BitcoinWallet {
             //
             // Commit the database transaction
             //
-            Db.db.commitTransaction();;
+            TokenDb.commitTransaction();;
         } catch (Exception exc) {
-            Db.db.rollbackTransaction();
-            Logger.logErrorMessage("Unable to process Bitcoin block chain fork at height " + splitPoint.getHeight(), exc);
+            Logger.logErrorMessage("Unable to process Bitcoin block chain fork at height "
+                    + splitPoint.getHeight(), exc);
+            try {
+                TokenDb.rollbackTransaction();
+            } catch (Exception exc1) {
+                Logger.logErrorMessage(exc1.toString());
+            }
         } finally {
             releaseLock();
-            Db.db.endTransaction();
+            TokenDb.endTransaction();
         }
     }
 
@@ -541,12 +548,10 @@ public class BitcoinWallet {
             confidence.setAppearedAtChainHeight(height);
         } else {
             height = 0;
-            confidence.setConfidenceType(TransactionConfidence.ConfidenceType.PENDING);
+            if (!confidence.getConfidenceType().equals(TransactionConfidence.ConfidenceType.BUILDING)) {
+                confidence.setConfidenceType(TransactionConfidence.ConfidenceType.PENDING);
+            }
         }
-        //
-        // Remove transaction from broadcast table if it is one of ours
-        //
-        TokenDb.deleteBroadcastTransaction(txHash.getBytes());
         //
         // Process transaction outputs
         //
@@ -555,11 +560,20 @@ public class BitcoinWallet {
         // Our change outputs are ignored since they are already
         // in the unspent transaction output table.
         //
-        boolean isRelevant = false;
-        int index = -1;
-        List<TransactionOutput> outputs = tx.getOutputs();
+        TokenDb.beginTransaction();
         obtainLock();
         try {
+            //
+            // Remove transaction from broadcast table if it is one of ours
+            //
+            TokenDb.deleteBroadcastTransaction(txHash.getBytes());
+            //
+            // Process each transaction output
+            //
+            List<TransactionOutput> outputs = tx.getOutputs();
+            int index = -1;
+            long unspentBalance = 0;
+            boolean isRelevant = false;
             for (TransactionOutput output : outputs) {
                 index++;
                 Address address = output.getAddressFromP2PKHScript(params);
@@ -572,10 +586,6 @@ public class BitcoinWallet {
                 }
                 BitcoinUnspent unspent = TokenDb.getUnspentOutput(txHash.getBytes(), index, blockHash.getBytes());
                 if (unspent != null) {
-                    if (!unspent.isSpent()) {
-                        unspent.setHeight(height);
-                        TokenDb.updateUnspentOutput(unspent);
-                    }
                     continue;
                 }
                 if (!receiveAddress.getAddress().equals(walletAddress)) {
@@ -586,25 +596,33 @@ public class BitcoinWallet {
                         receiveAddress.getChildNumber(), externalParentKey.getChildNumber());
                 TokenDb.storeUnspentOutput(unspent);
                 if (height > 0) {
-                    walletBalance += amount;
+                    unspentBalance += amount;
                     Logger.logInfoMessage("Received Bitcoin transaction " + txHash
                         + " to " + receiveAddress.getAddress() + " for "
                         + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
                 }
             }
-        } catch (ScriptException exc) {
-            Logger.logErrorMessage("Script exception while processing Bitcoin transaction " + txHash
-                    + ", transaction ignored", exc);
+            //
+            // Process a user transaction
+            //
+            if (isRelevant) {
+                BitcoinProcessor.addTransaction(tx, block, height);
+            }
+            //
+            // Commit the database transaction
+            //
+            TokenDb.commitTransaction();
+            walletBalance += unspentBalance;
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash + ", transaction ignored", exc);
+            try {
+                TokenDb.rollbackTransaction();
+            } catch (Exception exc1) {
+                Logger.logErrorMessage(exc1.toString());
+            }
         } finally {
             releaseLock();
-        }
-        //
-        // Process an account transaction
-        //
-        if (isRelevant) {
-            BitcoinProcessor.addTransaction(tx, block, height);
+            TokenDb.endTransaction();
         }
     }
 
@@ -706,9 +724,10 @@ public class BitcoinWallet {
     /**
      * Get a new external key
      *
-     * @return                  New key or null
+     * @return                  New key
+     * @throws  SQLException    Database exception occurred
      */
-    static DeterministicKey getNewKey() {
+    static DeterministicKey getNewKey() throws SQLException {
         return getNewKey(externalParentKey);
     }
 
@@ -717,18 +736,17 @@ public class BitcoinWallet {
      *
      * @param   parentKey       Parent key
      * @return                  New key or null
+     * @throws  SQLException    Database error occurred
      */
-    static DeterministicKey getNewKey(DeterministicKey parentKey) {
+    static DeterministicKey getNewKey(DeterministicKey parentKey) throws SQLException {
         DeterministicKey key = null;
         ChildNumber child = TokenDb.getNewChild(parentKey.getChildNumber());
-        if (child != null) {
-            List<ChildNumber> path = HDUtils.append(parentKey.getPath(), child);
-            key = hierarchy.get(path, false, true);
-            if (parentKey == externalParentKey) {
-                Address address = key.toAddress(params);
-                ReceiveAddress receiveAddress = new ReceiveAddress(address, child, parentKey.getChildNumber());
-                receiveAddresses.put(address, receiveAddress);
-            }
+        List<ChildNumber> path = HDUtils.append(parentKey.getPath(), child);
+        key = hierarchy.get(path, false, true);
+        if (parentKey == externalParentKey) {
+            Address address = key.toAddress(params);
+            ReceiveAddress receiveAddress = new ReceiveAddress(address, child, parentKey.getChildNumber());
+            receiveAddresses.put(address, receiveAddress);
         }
         return key;
     }
@@ -829,28 +847,30 @@ public class BitcoinWallet {
     /**
      * Send coins to the target address
      *
-     * @param   address                     Target Bitcoin address
+     * @param   toAddress                   Target Bitcoin address
      * @param   coins                       Amount to send (BTC)
      * @return                              Transaction identifier
      */
-    static String sendCoins(String address, BigDecimal coins) {
-        return sendCoins(address, coins, false);
+    static String sendCoins(Address toAddress, BigDecimal coins) {
+        return sendCoins(toAddress, coins, false);
     }
 
     /**
      * Send coins to the target address
      *
-     * @param   address                     Target Bitcoin address
+     * An existing database transaction will be committed or rolled back
+     * before returning to the caller.
+     *
+     * @param   toAddress                   Target Bitcoin address
      * @param   coins                       Amount to send (BTC)
      * @param   emptyWallet                 TRUE if this is a request to empty the wallet
      * @return                              Transaction identifier
      */
-    static String sendCoins(String address, BigDecimal coins, boolean emptyWallet) {
+    static String sendCoins(Address toAddress, BigDecimal coins, boolean emptyWallet) {
         String transactionId = null;
-        Db.db.beginTransaction();
+        TokenDb.beginTransaction();
         obtainLock();
         try {
-            Address toAddress = Address.fromBase58(params, address);
             long amount = emptyWallet ? walletBalance : coins.movePointRight(8).longValue();
             if (amount < Transaction.MIN_NONDUST_OUTPUT.getValue()) {
                 throw new IllegalArgumentException("Transaction amount is too small");
@@ -963,9 +983,7 @@ public class BitcoinWallet {
             //
             List<BitcoinUnspent> usedOutputs = unspentList.subList(0, tx.getInputs().size());
             for (BitcoinUnspent unspent : usedOutputs) {
-                if (!TokenDb.spendOutput(unspent.getId(), unspent.getIndex())) {
-                    throw new IllegalStateException("Unable to mark connected outputs as spent");
-                }
+                TokenDb.spendOutput(unspent.getId(), unspent.getIndex());
             }
             //
             // Add the change output to the unspent outputs now so that it is available
@@ -974,38 +992,31 @@ public class BitcoinWallet {
             if (change > 0) {
                 BitcoinUnspent changeOutput = new BitcoinUnspent(tx.getHash().getBytes(), 1, dummyBlock,
                         change, getChainHeight(), changeKey.getChildNumber(), internalParentKey.getChildNumber());
-                if (!TokenDb.storeUnspentOutput(changeOutput)) {
-                    throw new IllegalStateException("Unable to store change output");
-                }
+                TokenDb.storeUnspentOutput(changeOutput);
             }
             //
             // Broadcast the transaction
             //
-            if (!TokenDb.storeBroadcastTransaction(tx)) {
-                throw new IllegalStateException("Unable to store broadcast transaction");
-            }
+            TokenDb.storeBroadcastTransaction(tx);
             peerGroup.broadcastTransaction(tx);
             //
             // All is well - commit the database transaction
             //
-            Db.db.commitTransaction();
+            TokenDb.commitTransaction();
             walletBalance -= amount + fee - change;
             transactionId = tx.getHashAsString();
             Logger.logInfoMessage("Broadcast Bitcoin transaction " + transactionId + " for "
                     + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
-        } catch (AddressFormatException exc) {
-            Db.db.rollbackTransaction();
-            throw new IllegalArgumentException("Bitcoin address is not valid");
-        } catch (IllegalArgumentException exc) {
-            Db.db.rollbackTransaction();
-            throw exc;
         } catch (Exception exc) {
-            Db.db.rollbackTransaction();
-            Logger.logErrorMessage("Unable to create send transaction", exc);
-            throw new RuntimeException(exc.getMessage());
+            try {
+                TokenDb.rollbackTransaction();
+            } catch (Exception exc1) {
+                Logger.logErrorMessage("Unable to rollback transaction", exc1);
+            }
+            throw new RuntimeException(exc.getMessage(), exc);
         } finally {
             releaseLock();
-            Db.db.endTransaction();
+            TokenDb.endTransaction();
         }
         return transactionId;
     }
@@ -1013,10 +1024,10 @@ public class BitcoinWallet {
     /**
      * Empty the wallet
      *
-     * @param   address                     Target Bitcoin address
+     * @param   toAddress                   Target Bitcoin address
      * @return                              Transaction identifier
      */
-    static String emptyWallet(String address) {
-        return sendCoins(address, BigDecimal.ZERO, true);
+    static String emptyWallet(Address toAddress) {
+        return sendCoins(toAddress, BigDecimal.ZERO, true);
     }
 }

@@ -44,12 +44,6 @@ The following functions are available:
   
   - DeleteAddress    
     Delete a bitcoin address associated with a Nxt user. Specify 'function=deleteAddress&address=s' in the HTTP request.  Any Bitcoins sent to the address after it has been deleted will be lost.
-    
-  - DeleteBitcoinTransaction    
-    Delete a Bitcoin transaction.  Specify 'function=deleteBitcoinTransaction&id=string' in the HTTP request.
-    
-  - DeleteNxtTransaction    
-    Delete a Nxt transaction.  Specify 'function=deleteNxtTransaction&id=string' in the HTTP request.  
 
   - EmptyWallet    
     Empty the Bitcoin wallet and send all of the coins to the target address.  The transaction fee will be subtracted from the amount sent.  Specify 'function=emptyWallet&address=string' in the HTTP request.
@@ -73,7 +67,7 @@ The following functions are available:
     Resume sending bitcoins for redeemed tokens and issuing tokens for received bitcoins.  Specify 'function=resume' in the HTTP request.  Pending requests will be processed and normal processing will resume.
   
   - RollbackChain    
-    Roll back the Bitcoin block chain to the specified height and process transactions again.  Specify 'function=rollbackChain&height=n' in the HTTP request.  This function can be used to recover transactions that are in blocks but were not processed previously.  The request cannot be processed if the desired block is no longer in the block chain cache (the cache holds 5000 blocks and the oldest block is removed when a new block is received).
+    Roll back the Bitcoin block chain to the specified height.  Specify 'function=rollbackChain&height=n' in the HTTP request.  This function can be used to recover transactions that are in blocks but were not processed previously.  The request cannot be processed if the desired block is no longer in the block chain cache (the cache holds 5000 blocks and the oldest block is removed when a new block is received).  A new best chain will be constructed when the next block is received from the network.
     
   - SendBitcoins    
     Send Bitcoins from the SPV wallet.  Specify 'function=sendBitcoins&address=string&amount=number' in the HTTP request.

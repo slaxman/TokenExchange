@@ -27,6 +27,8 @@ import nxt.crypto.EncryptedData;
 import nxt.util.Convert;
 import nxt.util.Logger;
 
+import org.bitcoinj.core.Address;
+
 import java.math.BigDecimal;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -75,6 +77,14 @@ public class TokenListener implements Runnable {
                 // Ignored since the queue is unbounded
             }
         }, BlockchainProcessor.Event.BLOCK_SCANNED);
+        blockchainProcessor.addListener((block) -> {
+            try {
+                BitcoinWallet.propagateContext();
+                TokenDb.popTokens(blockchain.getHeight());
+            } catch (Exception exc) {
+                Logger.logErrorMessage("Unable to pop Nxt transactions", exc);
+            }
+        }, BlockchainProcessor.Event.BLOCK_POPPED);
         //
         // Start listener thread
         //
@@ -163,7 +173,6 @@ public class TokenListener implements Runnable {
                             continue;
                         }
                         if (TokenDb.tokenExists(tx.getId())) {
-                            Logger.logDebugMessage("Token transaction " + txIdString + " is already in the database");
                             continue;
                         }
                         byte[] msg;
@@ -217,9 +226,7 @@ public class TokenListener implements Runnable {
                         TokenTransaction token = new TokenTransaction(tx.getId(), tx.getSenderId(),
                                 block.getHeight(), tx.getTimestamp(), units,
                                 bitcoinAmount.movePointRight(8).longValue(), bitcoinAddress);
-                        if (!TokenDb.storeToken(token)) {
-                            throw new RuntimeException("Unable to store token transaction in TokenExchange database");
-                        }
+                        TokenDb.storeToken(token);
                         Logger.logDebugMessage("Redeeming " + tokenAmount.toPlainString() + " units for "
                                     + bitcoinAmount.toPlainString() + " BTC to " + bitcoinAddress);
                     }
@@ -237,8 +244,9 @@ public class TokenListener implements Runnable {
                         List<TokenTransaction> tokenList = TokenDb.getPendingTokens(blockchain.getHeight() - TokenAddon.nxtConfirmations);
                         for (TokenTransaction token : tokenList) {
                             String address = token.getBitcoinAddress();
+                            Address toAddress = Address.fromBase58(BitcoinWallet.getNetworkParameters(), address);
                             BigDecimal amount = BigDecimal.valueOf(token.getBitcoinAmount(), 8);
-                            String txString = BitcoinWallet.sendCoins(address, amount);
+                            String txString = BitcoinWallet.sendCoins(toAddress, amount);
                             token.setExchanged(Convert.parseHexString(txString));
                             TokenDb.updateToken(token);
                             Logger.logInfoMessage("Sent " + amount.stripTrailingZeros().toPlainString()

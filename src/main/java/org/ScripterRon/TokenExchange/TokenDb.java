@@ -16,7 +16,6 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Db;
-import nxt.db.DerivedDbTable;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.Context;
@@ -157,70 +156,12 @@ public class TokenDb {
                     + BITCOIN_TABLE + "_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
 
     /**
-     * Nxt transaction table
-     *
-     * A DerivedDbTable provides rollback() and truncate() methods which
-     * a called by the block chain processor when blocks are popped off.
-     * So we only need to worry about adding rows to the table as new
-     * blocks are pushed.
-     */
-    private static class TokenExchangeTable extends DerivedDbTable {
-
-        /**
-         * Initialize the table
-         *
-         * @param   name        Table name
-         */
-        private TokenExchangeTable(String name) {
-            super(name);
-        }
-
-        /**
-         * Rollback to the specified height
-         *
-         * We need to override the default rollback() method because we
-         * do not want to delete tokens that have been exchanged.
-         *
-         * @param   height      Rollback height
-         */
-        @Override
-        public void rollback(int height) {
-            if (!db.isInTransaction()) {
-                throw new IllegalStateException("Not in transaction");
-            }
-            try (Connection conn = db.getConnection();
-                    PreparedStatement pstmtDelete = conn.prepareStatement(
-                        "DELETE FROM " + table + " WHERE exchanged=false AND height > ?")) {
-                pstmtDelete.setInt(1, height);
-                pstmtDelete.executeUpdate();
-            } catch (SQLException e) {
-                throw new RuntimeException(e.toString(), e);
-            }
-        }
-
-        /**
-         * Truncate the table
-         *
-         * We need to treat this as a rollback to 0 since we do not want
-         * to delete tokens that have been exchanged.
-         */
-        @Override
-        public void truncate() {
-            rollback(0);
-        }
-    }
-
-    /** TokenExchange tables */
-    private static TokenExchangeTable tokenTable;
-
-    /**
      * Initialize the database support
      *
      * @throws  SQLException    SQL error occurred
      */
     static void init() throws SQLException {
-        tokenTable = new TokenExchangeTable(NXT_TABLE);
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 Statement stmt = conn.createStatement()) {
             //
             // Update the table definitions if necessary
@@ -285,18 +226,16 @@ public class TokenDb {
      * Get the database creation time
      *
      * @return                  Database creation time (seconds since Unix epoch)
+     * @throws  SQLException    Error occurred
      */
-    static long getCreationTime() {
+    static long getCreationTime() throws SQLException {
         long creationTime = 0;
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT creation_time FROM " + CONTROL_TABLE)) {
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    creationTime = rs.getLong("creation_time");
-                }
+        try (Connection conn = getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT creation_time FROM " + CONTROL_TABLE);
+                ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                creationTime = rs.getLong("creation_time");
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get creation time from TokenExchange table", exc);
         }
         return creationTime;
     }
@@ -305,16 +244,16 @@ public class TokenDb {
      * Store the deterministic key seed
      *
      * @param   seed            Deterministic key seed
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeSeed(DeterministicSeed seed) {
-        int count = 0;
+    static void storeSeed(DeterministicSeed seed) throws SQLException {
         //
         // Encode the deterministic seed
         //
         byte[] seedBytes = seed.getSeedBytes();
         List<String> codes = seed.getMnemonicCode();
         if (seedBytes == null || codes == null) {
-            throw new IllegalArgumentException("Deterministic seed is not valid");
+            throw new SQLException("Deterministic seed is not valid");
         }
         long creationTime = seed.getCreationTimeSeconds();
         int codeLength = 2;
@@ -337,36 +276,31 @@ public class TokenDb {
         //
         // Store the encoded seed
         //
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET seed=?")) {
             stmt.setBytes(1, encodedSeed);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store deterministic seed in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
      * Get the deterministic seed
      *
      * @return                  Deterministic seed or null
+     * @throws  SQLException    Error occurred
      */
-    static DeterministicSeed getSeed() {
+    static DeterministicSeed getSeed() throws SQLException {
         DeterministicSeed seed = null;
         byte[] encodedSeed = null;
         //
         // Get the encoded seed
         //
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("SELECT seed FROM " + CONTROL_TABLE)) {
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    encodedSeed = rs.getBytes("seed");
-                }
+        try (Connection conn = getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT seed FROM " + CONTROL_TABLE);
+                ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                encodedSeed = rs.getBytes("seed");
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get deterministic seed from TokenExchange table", exc);
         }
         //
         // Decode the seed
@@ -399,25 +333,20 @@ public class TokenDb {
      * Get the next child for the specified parent
      *
      * @param   parent          Parent (0 = external, 1 = internal)
-     * @return                  Next child or null
+     * @return                  Next child
+     * @throws  SQLException    Error occurred
      */
-    static ChildNumber getNewChild(ChildNumber parent) {
-        ChildNumber child = null;
+    static ChildNumber getNewChild(ChildNumber parent) throws SQLException {
+        ChildNumber child;
         String column = (parent.getI() == 0 ? "external_key" : "internal_key");
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt1 = conn.prepareStatement("SELECT " + column + " FROM " + CONTROL_TABLE);
-                PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET " + column + "=?")) {
-            try (ResultSet rs = stmt1.executeQuery()) {
-                if (rs.next()) {
-                    child = new ChildNumber(rs.getInt(column));
-                }
-            }
-            if (child != null) {
-                stmt2.setInt(1, child.getI() + 1);
-                stmt2.executeUpdate();
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to update child number in TokenExchange table", exc);
+                PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET " + column + "=?");
+                ResultSet rs = stmt1.executeQuery()) {
+            rs.next();
+            child = new ChildNumber(rs.getInt(column));
+            stmt2.setInt(1, child.getI() + 1);
+            stmt2.executeUpdate();
         }
         return child;
     }
@@ -426,21 +355,15 @@ public class TokenDb {
      * Set the token exchange rate
      *
      * @param   rate            Exchange rate
-     * @return                  TRUE if the exchange rate was set
+     * @throws  SQLException    Error occurred
      */
-    static boolean setExchangeRate(BigDecimal rate) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void setExchangeRate(BigDecimal rate) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + CONTROL_TABLE + " SET exchange_rate=?")) {
             stmt.setLong(1, rate.movePointRight(8).longValue());
-            count = stmt.executeUpdate();
-            if (count > 0) {
-                TokenAddon.exchangeRate = rate;
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to set token exchange rate in TokenExchange table", exc);
+            stmt.executeUpdate();
+            TokenAddon.exchangeRate = rate;
         }
-        return count != 0;
     }
 
     /**
@@ -449,11 +372,12 @@ public class TokenDb {
      * @param   txid            Transaction identifier
      * @param   index           Transaction output index
      * @param   blkid           Block identifier
-     * @return                  Unspent output or null
+     * @return                  Unspent output or null if not found
+     * @throws  SQLException    Error occurred
      */
-    static BitcoinUnspent getUnspentOutput(byte[] txid, int index, byte[] blkid) {
+    static BitcoinUnspent getUnspentOutput(byte[] txid, int index, byte[] blkid) throws SQLException {
         BitcoinUnspent unspent = null;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
                         + " WHERE txid=? AND index=? AND blkid=?")) {
             stmt.setBytes(1, txid);
@@ -464,8 +388,6 @@ public class TokenDb {
                     unspent = new BitcoinUnspent(rs);
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get unspent output from Token Exchange table", exc);
         }
         return unspent;
     }
@@ -474,10 +396,11 @@ public class TokenDb {
      * Get all active unspent outputs ordered by amount
      *
      * @return                  List of unspent outputs
+     * @throws  SQLException    Error occurred
      */
-    static List<BitcoinUnspent> getUnspentOutputs() {
+    static List<BitcoinUnspent> getUnspentOutputs() throws SQLException {
         List<BitcoinUnspent> unspentList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + UNSPENT_TABLE
                         + " WHERE spent=false AND height>0 ORDER BY amount ASC")) {
             try (ResultSet rs = stmt.executeQuery()) {
@@ -485,8 +408,6 @@ public class TokenDb {
                     unspentList.add(new BitcoinUnspent(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get unspent outputs from Token Exchange table", exc);
         }
         return unspentList;
     }
@@ -495,11 +416,10 @@ public class TokenDb {
      * Store a new unspent output
      *
      * @param   unspent         Unspent output
-     * @return                  TRUE if the output was stored
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeUnspentOutput(BitcoinUnspent unspent) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void storeUnspentOutput(BitcoinUnspent unspent) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + UNSPENT_TABLE
                         + " (txid,index,blkid,amount,spent,height,child_number,parent_number)"
                         + " VALUES(?,?,?,?,false,?,?,?)")) {
@@ -510,34 +430,8 @@ public class TokenDb {
             stmt.setInt(5, unspent.getHeight());
             stmt.setInt(6, unspent.getChildNumber().getI());
             stmt.setInt(7, unspent.getParentNumber().getI());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store unspent output in Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
-    }
-
-    /**
-     * Update an unspent output
-     *
-     * @param   unspent         Unspent output
-     * @return                  TRUE if the output was updated
-     */
-    static boolean updateUnspentOutput(BitcoinUnspent unspent) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
-                        + " SET spent=?,height=? WHERE txid=? AND index=? AND blkid=?")) {
-            stmt.setBoolean(1, unspent.isSpent());
-            stmt.setInt(2, unspent.getHeight());
-            stmt.setBytes(3, unspent.getId());
-            stmt.setInt(4, unspent.getIndex());
-            stmt.setBytes(5, unspent.getBlockId());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to update unspent output in Token Exchange table", exc);
-        }
-        return count != 0;
     }
 
     /**
@@ -545,20 +439,16 @@ public class TokenDb {
      *
      * @param   txid            Transaction identifier
      * @param   index           Transaction output index
-     * @return                  TRUE if the output was marked as spent
+     * @throws  SQLException    Error occurred
      */
-    static boolean spendOutput(byte[] txid, int index) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void spendOutput(byte[] txid, int index) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
                         + " SET spent=true WHERE txid=? AND index=?")) {
             stmt.setBytes(1, txid);
             stmt.setInt(2, index);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to update unspent output in Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
@@ -566,10 +456,11 @@ public class TokenDb {
      *
      * @param   height          Block chain height
      * @return                  Unspent amount deactivated
+     * @throws  SQLException    Error occurred
      */
-    static long deactivateUnspentOutputs(int height) {
+    static long deactivateUnspentOutputs(int height) throws SQLException {
         long amount = 0;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt1 = conn.prepareStatement("SELECT SUM(amount) AS amount FROM " + UNSPENT_TABLE
                         + " WHERE spent=false AND height>? AND parent_number=0");
                 PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
@@ -578,14 +469,10 @@ public class TokenDb {
             try (ResultSet rs = stmt1.executeQuery()) {
                 if (rs.next()) {
                     amount = rs.getLong("amount");
+                    stmt2.setInt(1, height);
+                    stmt2.executeUpdate();
                 }
             }
-            if (amount != 0) {
-                stmt2.setInt(1, height);
-                stmt2.executeUpdate();
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to deactivate unspent outputs in Token Exchange table", exc);
         }
         return amount;
     }
@@ -596,10 +483,11 @@ public class TokenDb {
      * @param   blkid           Block identifier
      * @param   height          Activation height
      * @return                  Unspent amount activated
+     * @throws  SQLException    Error occurred
      */
-    static long activateUnspentOutputs(byte[] blkid, int height) {
+    static long activateUnspentOutputs(byte[] blkid, int height) throws SQLException {
         long amount = 0;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt1 = conn.prepareStatement("SELECT SUM(amount) AS amount FROM " + UNSPENT_TABLE
                         + " WHERE spent=false AND blkid=?");
                 PreparedStatement stmt2 = conn.prepareStatement("UPDATE " + UNSPENT_TABLE
@@ -608,15 +496,11 @@ public class TokenDb {
             try (ResultSet rs = stmt1.executeQuery()) {
                 if (rs.next()) {
                     amount = rs.getLong("amount");
+                    stmt2.setInt(1, height);
+                    stmt2.setBytes(2, blkid);
+                    stmt2.executeUpdate();
                 }
             }
-            if (amount != 0) {
-                stmt2.setInt(1, height);
-                stmt2.setBytes(2, blkid);
-                stmt2.executeUpdate();
-            }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to activate unspent outputs ind Token Exchange table", exc);
         }
         return amount;
     }
@@ -625,11 +509,12 @@ public class TokenDb {
      * Get a broadcast transaction
      *
      * @param   txid            Transaction identifier
-     * @return                  Transaction or null
+     * @return                  Transaction or null if not found
+     * @throws  SQLException    Error occurred
      */
-    static Transaction getBroadcastTransaction(byte[] txid) {
+    static Transaction getBroadcastTransaction(byte[] txid) throws SQLException {
         Transaction tx = null;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT payload FROM " + BROADCAST_TABLE
                         + " WHERE txid=?")) {
             stmt.setBytes(1, txid);
@@ -637,12 +522,11 @@ public class TokenDb {
                 if (rs.next()) {
                     tx = new Transaction(Context.get().getParams(), rs.getBytes("payload"));
                     tx.getConfidence().setSource(TransactionConfidence.Source.SELF);
+                    tx.setPurpose(Transaction.Purpose.USER_PAYMENT);
                 }
             }
         } catch (ProtocolException exc) {
-            Logger.logErrorMessage("Unable to create Bitcoin transaction", exc);
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get a broadcast transaction from the Token Exchange table", exc);
+            throw new SQLException("Unable to create Bitcoin transaction from payload", exc);
         }
         return tx;
     }
@@ -651,22 +535,22 @@ public class TokenDb {
      * Get all broadcast transactions
      *
      * @return                  List of broadcast transactions
+     * @throws  SQLException    Error occurred
      */
-    static List<Transaction> getBroadcastTransactions() {
+    static List<Transaction> getBroadcastTransactions() throws SQLException {
         List<Transaction> txList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT payload FROM " + BROADCAST_TABLE)) {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     Transaction tx = new Transaction(Context.get().getParams(), rs.getBytes("payload"));
                     tx.getConfidence().setSource(TransactionConfidence.Source.SELF);
+                    tx.setPurpose(Transaction.Purpose.USER_PAYMENT);
                     txList.add(tx);
                 }
             }
         } catch (ProtocolException exc) {
-            Logger.logErrorMessage("Unable to create Bitcoin transaction", exc);
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get broadcast transactions from the Token Exchange table", exc);
+            throw new SQLException("Unable to create Bitcoin transaction from payload", exc);
         }
         return txList;
     }
@@ -675,40 +559,32 @@ public class TokenDb {
      * Store a broadcast transaction
      *
      * @param   tx              Transaction
-     * @return                  TRUE if the transaction was stored
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeBroadcastTransaction(Transaction tx) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void storeBroadcastTransaction(Transaction tx) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BROADCAST_TABLE
                         + " (txid,payload) VALUES(?,?)")) {
             byte[] payload = tx.bitcoinSerialize();
             stmt.setBytes(1, tx.getHash().getBytes());
             stmt.setBytes(2, payload);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store broadcast transaction in Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
      * Delete a broadcast transaction
      *
      * @param   txId            Transaction identifier
-     * @return                  TRUE if the transaction was deleted
+     * @throws  SQLException    Error occurred
      */
-    static boolean deleteBroadcastTransaction(byte[] txId) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void deleteBroadcastTransaction(byte[] txId) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + BROADCAST_TABLE
                         + " WHERE txid=?")) {
             stmt.setBytes(1, txId);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to delete broadcast transaction from Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
@@ -716,10 +592,11 @@ public class TokenDb {
      *
      * @param   id              Transaction identifier
      * @return                  TRUE if the transaction token exists
+     * @throws  SQLException    Error occurred
      */
-    static boolean tokenExists(long id) {
+    static boolean tokenExists(long id) throws SQLException {
         boolean exists = false;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + NXT_TABLE
                         + " WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
@@ -728,8 +605,6 @@ public class TokenDb {
                     exists = true;
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to check Nxt transaction in TokenExchange table", exc);
         }
         return exists;
     }
@@ -739,10 +614,11 @@ public class TokenDb {
      *
      * @param   id              Transaction identifier
      * @return                  Transaction token or null if not found
+     * @throws  SQLException    Error occurred
      */
-    static TokenTransaction getToken(long id) {
+    static TokenTransaction getToken(long id) throws SQLException {
         TokenTransaction tx = null;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE
                         + " WHERE nxt_txid=?")) {
             stmt.setLong(1, id);
@@ -751,8 +627,6 @@ public class TokenDb {
                     tx = new TokenTransaction(rs);
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to load Nxt transaction from TokenExchange table", exc);
         }
         return tx;
     }
@@ -763,10 +637,11 @@ public class TokenDb {
      * @param   height          Block height
      * @param   exchanged       TRUE to return exchanged tokens
      * @return                  List of token transactions
+     * @throws  SQLException    Error occurred
      */
-    static List<TokenTransaction> getTokens(int height, boolean exchanged) {
+    static List<TokenTransaction> getTokens(int height, boolean exchanged) throws SQLException {
         List<TokenTransaction> txList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE
                         + " WHERE height>=? " + (exchanged ? "" : "AND exchanged=false ")
                         + "ORDER BY height ASC,timestamp ASC")) {
@@ -776,8 +651,6 @@ public class TokenDb {
                     txList.add(new TokenTransaction(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get list of pending Nxt transactions from TokenExchange table", exc);
         }
         return txList;
     }
@@ -787,10 +660,11 @@ public class TokenDb {
      *
      * @param   height          Block height
      * @return                  List of transaction tokens
+     * @throws  SQLException    Error occurred
      */
-    static List<TokenTransaction> getPendingTokens(int height) {
+    static List<TokenTransaction> getPendingTokens(int height) throws SQLException {
         List<TokenTransaction> txList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + NXT_TABLE
                         + " WHERE exchanged=false AND height<=? ORDER BY height ASC")) {
             stmt.setInt(1, height);
@@ -799,8 +673,6 @@ public class TokenDb {
                     txList.add(new TokenTransaction(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get list of pending Nxt transactions from TokenExchange table", exc);
         }
         return txList;
     }
@@ -809,11 +681,10 @@ public class TokenDb {
      * Store a new token transaction
      *
      * @param   tx              Token transaction
-     * @return                  TRUE if the token was stored
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeToken(TokenTransaction tx) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void storeToken(TokenTransaction tx) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + NXT_TABLE
                         + " (nxt_txid,sender,height,timestamp,exchanged,token_amount,bitcoin_amount,bitcoin_address)"
                         + " VALUES(?,?,?,?,false,?,?,?)")) {
@@ -824,61 +695,49 @@ public class TokenDb {
             stmt.setLong(5, tx.getTokenAmount());
             stmt.setLong(6, tx.getBitcoinAmount());
             stmt.setString(7, tx.getBitcoinAddress());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store Nxt transaction in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
      * Update the token transaction status
      *
      * @param   tx              Token transaction
-     * @return                  TRUE if the token was updated
+     * @throws  SQLException    Error occurred
      */
-    static boolean updateToken(TokenTransaction tx) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void updateToken(TokenTransaction tx) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + NXT_TABLE
                         + " SET exchanged=true,bitcoin_txid=? WHERE nxt_txid=?")) {
             stmt.setBytes(1, tx.getBitcoinTxId());
             stmt.setLong(2, tx.getNxtTxId());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to update Nxt transaction in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
-     * Delete a token transaction
+     * Pop token transactions above the specified height
      *
-     * @param   id              Token identifier
-     * @return                  TRUE if the token was deleted
+     * @param   height          Height of the current last block
+     * @throws  SQLException    Error occurred
      */
-    static boolean deleteToken(long id) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void popTokens(int height) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + NXT_TABLE
-                        + " WHERE nxt_txid=?")) {
-            stmt.setLong(1, id);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to delete Nxt transaction from TokenExchange table", exc);
+                        + " WHERE exchanged=false AND height>?")) {
+            stmt.setInt(1, height);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
      * Store an account
      *
      * @param   account         Account
-     * @return                  TRUE if the address was stored
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeAccount(BitcoinAccount account) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void storeAccount(BitcoinAccount account) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + ACCOUNT_TABLE
                         + " (bitcoin_address,child_number,account_id,public_key,timestamp)"
                         + " VALUES(?,?,?,?,?)")) {
@@ -891,11 +750,8 @@ public class TokenDb {
                 stmt.setNull(4, Types.BINARY);
             }
             stmt.setInt(5, account.getTimestamp());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store account in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
@@ -903,10 +759,11 @@ public class TokenDb {
      *
      * @param   account_id      Account identifier
      * @return                  Account list
+     * @throws  SQLException    Error occurred
      */
-    static List<BitcoinAccount> getAccount(long accountId) {
+    static List<BitcoinAccount> getAccount(long accountId) throws SQLException {
         List<BitcoinAccount> accountList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE
                         + " WHERE account_id=? ORDER BY timestamp ASC")) {
             stmt.setLong(1, accountId);
@@ -915,8 +772,6 @@ public class TokenDb {
                     accountList.add(new BitcoinAccount(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get account from TokenExchange table", exc);
         }
         return accountList;
     }
@@ -926,10 +781,11 @@ public class TokenDb {
      *
      * @param   address         Bitcoin address
      * @return                  Nxt account or null
+     * @throws  SQLException    Error occurred
      */
-    static BitcoinAccount getAccount(String address) {
+    static BitcoinAccount getAccount(String address) throws SQLException {
         BitcoinAccount account = null;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE
                         + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
@@ -938,8 +794,6 @@ public class TokenDb {
                     account = new BitcoinAccount(rs);
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get account from TokenExchange table", exc);
         }
         return account;
     }
@@ -948,10 +802,11 @@ public class TokenDb {
      * Get all of the accounts ordered by account identifier and timestamp
      *
      * @return                  Account list
+     * @throws  SQLException    Error occurred
      */
-    static List<BitcoinAccount> getAccounts() {
+    static List<BitcoinAccount> getAccounts() throws SQLException {
         List<BitcoinAccount> accountList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + ACCOUNT_TABLE
                         + " ORDER BY account_id ASC,timestamp ASC")) {
             try (ResultSet rs = stmt.executeQuery()) {
@@ -959,8 +814,6 @@ public class TokenDb {
                     accountList.add(new BitcoinAccount(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get accounts from TokenExchange table", exc);
         }
         return accountList;
     }
@@ -970,16 +823,15 @@ public class TokenDb {
      *
      * @param   address         Bitcoin address associated with an account
      * @return                  TRUE if the address was deleted
+     * @throws  SQLException    Error occurred
      */
-    static boolean deleteAccountAddress(String address) {
+    static boolean deleteAccountAddress(String address) throws SQLException {
         int count = 0;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + ACCOUNT_TABLE
                         + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
             count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to delete account address from TokenExchange table", exc);
         }
         return count != 0;
     }
@@ -988,11 +840,10 @@ public class TokenDb {
      * Store a Bitcoin transaction
      *
      * @param   tx              Bitcoin transaction
-     * @return                  TRUE if the transaction was stored
+     * @throws  SQLException    Error occurred
      */
-    static boolean storeTransaction(BitcoinTransaction tx) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void storeTransaction(BitcoinTransaction tx) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BITCOIN_TABLE
                         + " (bitcoin_txid,bitcoin_blkid,height,timestamp,bitcoin_address,bitcoin_amount,"
                         + "  token_amount,account_id,exchanged,nxt_txid)"
@@ -1005,34 +856,25 @@ public class TokenDb {
             stmt.setLong(6, tx.getBitcoinAmount());
             stmt.setLong(7, tx.getTokenAmount());
             stmt.setLong(8, tx.getAccountId());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to store Bitcoin transaction in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
-     * Update a Bitcoin transaction
+     * Update all versions of a Bitcoin transaction
      *
      * @param   tx              Bitcoin transaction
-     * @return                  TRUE if the transaction was updated
+     * @throws  SQLException    Error occurred
      */
-    static boolean updateTransaction(BitcoinTransaction tx) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void updateTransaction(BitcoinTransaction tx) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
-                        + " SET exchanged=?,nxt_txid=?"
-                        + " WHERE bitcoin_txid=? AND bitcoin_blkid=?")) {
+                        + " SET exchanged=?,nxt_txid=? WHERE bitcoin_txid=?")) {
             stmt.setBoolean(1, tx.isExchanged());
             stmt.setLong(2, tx.getNxtTxId());
             stmt.setBytes(3, tx.getBitcoinTxId());
-            stmt.setBytes(4, tx.getBitcoinBlockId());
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to update Bitcoin transaction in TokenExchange table", exc);
+            stmt.executeUpdate();
         }
-        return count != 0;
     }
 
     /**
@@ -1040,10 +882,11 @@ public class TokenDb {
      *
      * @param   address         Bitcoin address
      * @return                  TRUE if a Bitcoin transaction exists
+     * @throws  SQLException    Error occurred
      */
-    static boolean transactionExists(String address) {
+    static boolean transactionExists(String address) throws SQLException {
         boolean exists = false;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE
                         + " WHERE bitcoin_address=?")) {
             stmt.setString(1, address);
@@ -1052,8 +895,6 @@ public class TokenDb {
                     exists = true;
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to check Bitcoin transaction in TokenExchange table", exc);
         }
         return exists;
     }
@@ -1064,12 +905,13 @@ public class TokenDb {
      * @param   txid            Transaction identifier
      * @param   blkid           Block identifier
      * @return                  TRUE if a Bitcoin transaction exists
+     * @throws  SQLException    Error occurred
      */
-    static boolean transactionExists(byte[] txid, byte[] blkid) {
+    static boolean transactionExists(byte[] txid, byte[] blkid) throws SQLException {
         boolean exists = false;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BITCOIN_TABLE
-                        + " WHERE bitcoin_address=? AND bitcoin_blkid=?")) {
+                        + " WHERE bitcoin_txid=? AND bitcoin_blkid=?")) {
             stmt.setBytes(1, txid);
             stmt.setBytes(2, blkid);
             try (ResultSet rs = stmt.executeQuery()) {
@@ -1077,8 +919,6 @@ public class TokenDb {
                     exists = true;
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to check Bitcoin transaction in TokenExchange table", exc);
         }
         return exists;
     }
@@ -1089,10 +929,11 @@ public class TokenDb {
      * @param   txid            Bitcoin transaction identifier
      * @param   blkid           Bitcoin block identifier
      * @return                  Bitcoin transaction or null
+     * @throws  SQLException    Error occurred
      */
-    static BitcoinTransaction getTransaction(byte[] txid, byte[] blkid) {
+    static BitcoinTransaction getTransaction(byte[] txid, byte[] blkid) throws SQLException {
         BitcoinTransaction tx = null;
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
                         + " WHERE bitcoin_txid=? AND bitcoin_blkid=?")) {
             stmt.setBytes(1, txid);
@@ -1102,8 +943,6 @@ public class TokenDb {
                     tx = new BitcoinTransaction(rs);
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get Bitcoin transaction from TokenExchange table", exc);
         }
         return tx;
     }
@@ -1115,10 +954,12 @@ public class TokenDb {
      * @param   address         Bitcoin address or null for all addresses
      * @param   exchanged       Include processed transactions
      * @return                  Bitcoin transaction list
+     * @throws  SQLException    Error occurred
      */
-    static List<BitcoinTransaction> getTransactions(int height, String address, boolean exchanged) {
+    static List<BitcoinTransaction> getTransactions(int height, String address, boolean exchanged)
+                                throws SQLException {
         List<BitcoinTransaction> txList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
                         + " WHERE height>=? "
                         + (address!=null ? (exchanged ? "AND bitcoin_address=? " :
@@ -1134,8 +975,6 @@ public class TokenDb {
                     txList.add(new BitcoinTransaction(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get Bitcoin transaction from TokenExchange table", exc);
         }
         return txList;
     }
@@ -1145,10 +984,11 @@ public class TokenDb {
      *
      * @param   height          Block height
      * @return                  List of transaction
+     * @throws  SQLException    Error occurred
      */
-    static List<BitcoinTransaction> getPendingTransactions(int height) {
+    static List<BitcoinTransaction> getPendingTransactions(int height) throws SQLException {
         List<BitcoinTransaction> txList = new ArrayList<>();
-        try (Connection conn = Db.db.getConnection();
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("SELECT * FROM " + BITCOIN_TABLE
                         + " WHERE exchanged=false AND height<=? AND height>0 ORDER BY height ASC")) {
             stmt.setInt(1, height);
@@ -1157,51 +997,23 @@ public class TokenDb {
                     txList.add(new BitcoinTransaction(rs));
                 }
             }
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to get list of pending Bitcoin transactions from TokenExchange table", exc);
         }
         return txList;
-    }
-
-    /**
-     * Delete a Bitcoin transaction
-     *
-     * @param   id              Transaction identifier
-     * @return                  TRUE if the transaction was deleted
-     */
-    static boolean deleteTransaction(byte[] id) {
-        if (id == null) {
-            return false;
-        }
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
-                PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + BITCOIN_TABLE
-                        + " WHERE bitcoin_txid=?")) {
-            stmt.setBytes(1, id);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to delete Bitcoin transaction from TokenExchange table", exc);
-        }
-        return count != 0;
     }
 
     /**
      * Deactivate Bitcoin transactions
      *
      * @param   height          Deactivate all transactions above this height
-     * @return                  Number of transactions updated
+     * @throws  SQLException    Error occurred
      */
-    static int deactivateTransactions(int height) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void deactivateTransactions(int height) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
                         + " SET height=0 WHERE exchanged=false AND height>?")) {
             stmt.setInt(1, height);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to deactivate Bitcoin transactions in Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count;
     }
 
     /**
@@ -1209,19 +1021,76 @@ public class TokenDb {
      *
      * @param   blkid           Activate all transactions for this block
      * @param   height          Activation height
-     * @return                  Number of transactions updated
+     * @throws  SQLException    Error occurred
      */
-    static int activateTransactions(byte[] blkid, int height) {
-        int count = 0;
-        try (Connection conn = Db.db.getConnection();
+    static void activateTransactions(byte[] blkid, int height) throws SQLException {
+        try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("UPDATE " + BITCOIN_TABLE
                         + " SET height=? WHERE exchanged=false AND bitcoin_blkid=?")) {
             stmt.setInt(1, height);
             stmt.setBytes(2, blkid);
-            count = stmt.executeUpdate();
-        } catch (SQLException exc) {
-            Logger.logErrorMessage("Unable to activate Bitcoin transactions in Token Exchange table", exc);
+            stmt.executeUpdate();
         }
-        return count;
+    }
+
+    /**
+     * Get a database connection
+     *
+     * @return                  Database connection
+     * @throws  SQLException    Error occurred
+     */
+    static Connection getConnection() throws SQLException {
+        return Db.db.getConnection();
+    }
+
+    /**
+     * Check if a database transaction has been started
+     *
+     * @return                  TRUE if database transaction started
+     */
+    static boolean isInTransaction() {
+        return Db.db.isInTransaction();
+    }
+
+    /**
+     * Start a database transaction
+     *
+     * @return                  Database connection
+     */
+    static Connection beginTransaction() {
+        return Db.db.beginTransaction();
+    }
+
+    /**
+     * Commit a database transaction
+     *
+     * @throws  SQLException    Database error occurred
+     */
+    static void commitTransaction() throws SQLException {
+        try {
+            Db.db.commitTransaction();
+        } catch (Exception exc) {
+            throw new SQLException("Unable to commit database transaction", exc);
+        }
+    }
+
+    /**
+     * Rollback a database transaction
+     *
+     * @throws  SQLException    Database error occurred
+     */
+    static void rollbackTransaction() throws SQLException {
+        try {
+            Db.db.rollbackTransaction();
+        } catch (Exception exc) {
+            throw new SQLException("Unable to rollback database transaction", exc);
+        }
+    }
+
+    /**
+     * End a database connection
+     */
+    static void endTransaction() {
+        Db.db.endTransaction();
     }
 }
