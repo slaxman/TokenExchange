@@ -27,7 +27,6 @@ import org.bitcoinj.core.ScriptException;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionOutput;
 
 import java.math.BigDecimal;
@@ -122,14 +121,7 @@ public class BitcoinProcessor implements Runnable {
         obtainLock();
         try {
             int timestamp = Nxt.getEpochTime();
-            BitcoinTransaction btx = TokenDb.getTransaction(txHash.getBytes(), blockHash.getBytes());
-            //
-            // Update an existing transaction (this can happen if the block chain
-            // is reorganized)
-            //
-            if (btx != null) {
-                btx.setHeight(height);
-                TokenDb.updateTransaction(btx);
+            if (TokenDb.transactionExists(txHash.getBytes(), blockHash.getBytes())) {
                 return;
             }
             //
@@ -150,8 +142,8 @@ public class BitcoinProcessor implements Runnable {
                 }
                 BigDecimal bitcoinAmount = BigDecimal.valueOf(output.getValue().getValue(), 8);
                 BigDecimal tokenAmount = bitcoinAmount.divide(TokenAddon.exchangeRate);
-                btx = new BitcoinTransaction(txHash.getBytes(), blockHash.getBytes(), height,
-                        timestamp, bitcoinAddress,
+                BitcoinTransaction btx = new BitcoinTransaction(txHash.getBytes(), blockHash.getBytes(),
+                        height, timestamp, bitcoinAddress,
                         account.getAccountId(), bitcoinAmount.movePointRight(8).longValue(),
                         tokenAmount.movePointRight(TokenAddon.currencyDecimals).longValue());
                 TokenDb.storeTransaction(btx);

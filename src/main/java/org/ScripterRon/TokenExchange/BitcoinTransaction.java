@@ -35,10 +35,10 @@ class BitcoinTransaction {
     private final String bitcoinAddress;
 
     /** Bitcoin block height */
-    private int height;
+    private final int height;
 
     /** Bitcoin transaction timestamp */
-    private int timestamp;
+    private final int timestamp;
 
     /** Bitcoin transaction amount */
     private final long bitcoinAmount;
@@ -153,30 +153,12 @@ class BitcoinTransaction {
     }
 
     /**
-     * Set the Bitcoin block height
-     *
-     * @param   height          Block height
-     */
-    void setHeight(int height) {
-        this.height = height;
-    }
-
-    /**
      * Get the Bitcoin transaction timestamp
      *
      * @return  timestamp       Transaction timestamp or 0 if not in block yet
      */
     int getTimestamp() {
         return timestamp;
-    }
-
-    /**
-     * Set the Bitcoin transaction timestamp
-     *
-     * @param   height          Transaction timestamp
-     */
-    void setTimestamp(int timestamp) {
-        this.timestamp = timestamp;
     }
 
     /**

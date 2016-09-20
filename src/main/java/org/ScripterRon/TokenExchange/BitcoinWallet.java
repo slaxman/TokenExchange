@@ -963,8 +963,7 @@ public class BitcoinWallet {
             //
             List<BitcoinUnspent> usedOutputs = unspentList.subList(0, tx.getInputs().size());
             for (BitcoinUnspent unspent : usedOutputs) {
-                unspent.setSpent(true);
-                if (!TokenDb.updateUnspentOutput(unspent)) {
+                if (!TokenDb.spendOutput(unspent.getId(), unspent.getIndex())) {
                     throw new IllegalStateException("Unable to mark connected outputs as spent");
                 }
             }
