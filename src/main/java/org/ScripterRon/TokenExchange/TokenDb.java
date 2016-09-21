@@ -40,6 +40,7 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * TokenExchange database support
@@ -191,9 +192,36 @@ public class TokenDb {
     /**
      * Initialize the database support
      *
+     * @param   properties      TokenExchange properties
      * @throws  SQLException    SQL error occurred
      */
-    static void init() throws SQLException {
+    static void init(Properties properties) throws SQLException {
+        //
+        // Get the database properties
+        //
+        String type = TokenAddon.getStringProperty(properties, "dbType", false);
+        if (type == null || type.equals("NRS")) {
+            dbType = DbType.NRS;
+        } else if (type.equals("H2")) {
+            dbType = DbType.H2;
+        } else {
+            throw new IllegalArgumentException("Database type '" + type + "' is not valid");
+        }
+        dbURL = TokenAddon.getStringProperty(properties, "dbURL", false);
+        dbUser = TokenAddon.getStringProperty(properties, "dbUser", false);
+        dbPassword = TokenAddon.getStringProperty(properties, "dbPassword", false);
+        if (dbURL == null && dbType != DbType.NRS) {
+            throw new IllegalArgumentException("Database URL not specified");
+        }
+        if (dbUser == null) {
+            dbUser = "";
+        }
+        if (dbPassword == null) {
+            dbPassword = "";
+        }
+        //
+        // Open the database
+        //
         try (Connection conn = getConnection();
                 Statement stmt = conn.createStatement()) {
             //
@@ -876,7 +904,7 @@ public class TokenDb {
      * @throws  SQLException    Error occurred
      */
     static boolean deleteAccountAddress(String address) throws SQLException {
-        int count = 0;
+        int count;
         try (Connection conn = getConnection();
                 PreparedStatement stmt = conn.prepareStatement("DELETE FROM " + ACCOUNT_TABLE
                         + " WHERE bitcoin_address=?")) {
@@ -1104,6 +1132,7 @@ public class TokenDb {
                         } else {
                             conn = new DbConnection(DriverManager.getConnection(dbURL, dbUser, dbPassword));
                             allConnections.add((DbConnection)conn);
+                            Logger.logDebugMessage("TokenExchange connection pool size: " + allConnections.size());
                         }
                     }
                 }
@@ -1286,7 +1315,7 @@ public class TokenDb {
                     cachedConnections.add(this);
                 }
             } else if (this != localConnection.get()) {
-                throw new IllegalStateException("Previous connection not committed");
+                throw new IllegalStateException("Previous transaction not ended");
             }
         }
 

@@ -179,7 +179,7 @@ public class TokenAddon implements AddOn, Listener<Block> {
             //
             // Initialize the token exchange database
             //
-            TokenDb.init();
+            TokenDb.init(properties);
             //
             // Delay TokenExchange initialization if the Nxt account or currency does not exist yet
             //
@@ -206,7 +206,7 @@ public class TokenAddon implements AddOn, Listener<Block> {
      * @param   required        TRUE if this is a required property
      * @return                  Property value or null
      */
-    private String getStringProperty(Properties properties, String name, boolean required) {
+    static String getStringProperty(Properties properties, String name, boolean required) {
         String value = properties.getProperty(name);
         if (value == null || value.isEmpty()) {
             if (required) {
@@ -225,7 +225,7 @@ public class TokenAddon implements AddOn, Listener<Block> {
      * @param   required        TRUE if this is a required property
      * @return                  Property value or zero
      */
-    private int getIntegerProperty(Properties properties, String name, boolean required) {
+    static int getIntegerProperty(Properties properties, String name, boolean required) {
         int result;
         String value = getStringProperty(properties, name, required);
         if (value == null) {
@@ -247,7 +247,7 @@ public class TokenAddon implements AddOn, Listener<Block> {
      * @param   required        TRUE if this is a required property
      * @return                  Property value or zero
      */
-    private BigDecimal getDecimalProperty(Properties properties, String name, boolean required) {
+    static BigDecimal getDecimalProperty(Properties properties, String name, boolean required) {
         BigDecimal result;
         String value = getStringProperty(properties, name, required);
         if (value == null) {

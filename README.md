@@ -1,7 +1,7 @@
 TokenExchange Version 4
 =======================
 
-TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 4 stores the Bitcoin wallet in SQL tables.  TokenExchange uses the NRS database support, so be sure to empty the Bitcoin wallet before deleting the NRS database directory or your coins will be lost.
+TokenExchange is a NRS add-on that automates the process of exchanging Nxt currency for Bitcoins and issuing Nxt currency when receiving Bitcoins.  TokenExchange Version 4 stores the Bitcoin wallet in SQL tables stored in either the NRS database or a database managed by an external server.  If the tables are stored in the NRS database, be sure to empty the Bitcoin wallet before deleting the NRS database directory or your coins will be lost.
 
 TokenExchange watches for currency transfer transactions for the specified currency.  If the transfer is to the redemption Nxt account, a Bitcoin transaction will be initiated to send the equivalent amount of Bitcoins to the Bitcoin address that was specified as a message attached to the transfer transaction.  The attached message must be a plain or encrypted prunable message.
 
@@ -31,6 +31,19 @@ The token-exchange.properties configuration file controls the operation of Token
     
 - bitcoinServer=host:port    
     A local Bitcoin server will be used if one is found.  If there is no local server, then the server specified by this field will be used.  A set of random servers will be selected if this field is not specified.
+    
+- dbType=type    
+    - NRS specifies the database managed by the NRS server and is the default.
+    - H2 specifies a database managed by a separate H2 database server.
+
+- dbURL=url   
+    This specifies the URL used to connect to an external database server and is ignored for the NRS database.  The URL format is defined by the external database server.  For an H2 server, the format is 'jdbc:h2:tcp://host:port/db-path'.
+    
+- dbUser=user    
+    This specifies the user for a connection to an external database server and is ignored for the NRS database.
+    
+- dbPassword=password    
+    This specifies the password for a connection to an external database server and is ignored for the NRS database.
 
 
 TokenExchange API
