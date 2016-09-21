@@ -63,8 +63,10 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import org.bitcoinj.core.TransactionConfidence;
 
@@ -132,6 +134,9 @@ public class BitcoinWallet {
 
     /** Receive addresses */
     private static final Map<Address, ReceiveAddress> receiveAddresses = new HashMap<>();
+
+    /** Broadcast list */
+    private static final Set<String> broadcastList = new HashSet<>();
 
     /** Peer discovery */
     private static final BitcoinDiscovery peerDiscovery = new BitcoinDiscovery();
@@ -245,6 +250,7 @@ public class BitcoinWallet {
             List<Transaction> pendingList = TokenDb.getBroadcastTransactions();
             for (Transaction tx : pendingList) {
                 peerGroup.broadcastTransaction(tx);
+                broadcastList.add(tx.getHash().toString());
             }
             //
             // Wallet initialization completed.  The Nxt transaction listener is
@@ -534,6 +540,9 @@ public class BitcoinWallet {
                                 BlockChain.NewBlockType blockType, int offset) {
         Sha256Hash txHash = tx.getHash();
         Sha256Hash blockHash = block.getHeader().getHash();
+        //
+        // Set the transaction confidence
+        //
         TransactionConfidence confidence = tx.getConfidence();
         confidence.setSource(TransactionConfidence.Source.NETWORK);
         int height;
@@ -559,9 +568,11 @@ public class BitcoinWallet {
         try {
             TokenDb.beginTransaction();
             //
-            // Remove transaction from broadcast table if it is one of ours
+            // Remove the transaction from the broadcast table if it is one of ours
             //
-            TokenDb.deleteBroadcastTransaction(txHash.getBytes());
+            if (broadcastList.remove(txHash.toString())) {
+                TokenDb.deleteBroadcastTransaction(txHash.getBytes());
+            }
             //
             // Process each transaction output
             //
@@ -989,6 +1000,7 @@ public class BitcoinWallet {
             //
             TokenDb.storeBroadcastTransaction(tx);
             peerGroup.broadcastTransaction(tx);
+            broadcastList.add(tx.getHash().toString());
             //
             // All is well - commit the database transaction
             //
