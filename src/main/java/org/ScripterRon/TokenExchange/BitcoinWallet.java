@@ -566,7 +566,6 @@ public class BitcoinWallet {
         //
         obtainLock();
         try {
-            TokenDb.beginTransaction();
             //
             // Remove the transaction from the broadcast table if it is one of ours
             //
@@ -578,7 +577,6 @@ public class BitcoinWallet {
             //
             List<TransactionOutput> outputs = tx.getOutputs();
             int index = -1;
-            long unspentBalance = 0;
             boolean isRelevant = false;
             for (TransactionOutput output : outputs) {
                 index++;
@@ -590,19 +588,19 @@ public class BitcoinWallet {
                 if (receiveAddress == null) {
                     continue;
                 }
+                if (!receiveAddress.getAddress().equals(walletAddress)) {
+                    isRelevant = true;
+                }
                 BitcoinUnspent unspent = TokenDb.getUnspentOutput(txHash.getBytes(), index, blockHash.getBytes());
                 if (unspent != null) {
                     continue;
-                }
-                if (!receiveAddress.getAddress().equals(walletAddress)) {
-                    isRelevant = true;
                 }
                 long amount = output.getValue().getValue();
                 unspent = new BitcoinUnspent(txHash.getBytes(), index, blockHash.getBytes(), amount, height,
                         receiveAddress.getChildNumber(), externalParentKey.getChildNumber());
                 TokenDb.storeUnspentOutput(unspent);
                 if (height > 0) {
-                    unspentBalance += amount;
+                    walletBalance += amount;
                     Logger.logInfoMessage("Received Bitcoin transaction " + txHash
                         + " to " + receiveAddress.getAddress() + " for "
                         + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
@@ -614,17 +612,10 @@ public class BitcoinWallet {
             if (isRelevant) {
                 BitcoinProcessor.addTransaction(tx, block, height);
             }
-            //
-            // Commit the database transaction
-            //
-            TokenDb.commitTransaction();
-            walletBalance += unspentBalance;
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash + ", transaction ignored", exc);
-            TokenDb.rollbackTransaction();
         } finally {
             releaseLock();
-            TokenDb.endTransaction();
         }
     }
 
