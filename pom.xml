@@ -11,6 +11,7 @@
         <maven.compiler.target>1.8</maven.compiler.target>
         <nxtpeer.version>1.10.2</nxtpeer.version>
         <bitcoinj.version>0.15-SNAPSHOT-1</bitcoinj.version>
+        <postgresql.version>9.4.1211.jre7</postgresql.version>
     </properties>
     <name>NRS Token Exchange</name>
     <url>https://github.com/ScripterRon/TokenExchange</url>
@@ -82,7 +83,7 @@
                             <overWriteReleases>false</overWriteReleases>
                             <overWriteSnapshots>false</overWriteSnapshots>
                             <overWriteIfNewer>true</overWriteIfNewer>
-                            <includeGroupIds>org.bitcoinj,com.google.guava,com.google.protobuf,org.fusesource.leveldbjni,com.madgag.spongycastle</includeGroupIds>
+                            <includeGroupIds>org.bitcoinj,com.google.guava,com.google.protobuf,org.fusesource.leveldbjni,com.madgag.spongycastle,org.postgresql</includeGroupIds>
                         </configuration>
                     </execution>
                 </executions>
@@ -99,6 +100,11 @@
             <groupId>org.bitcoinj</groupId>
             <artifactId>bitcoinj-core</artifactId>
             <version>${bitcoinj.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
         </dependency>
     </dependencies>
 </project>

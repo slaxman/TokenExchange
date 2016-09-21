@@ -16,6 +16,8 @@
 package org.ScripterRon.TokenExchange;
 
 import nxt.Db;
+import nxt.db.FilteredConnection;
+import nxt.db.FilteredFactory;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.Context;
@@ -30,6 +32,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -52,6 +55,36 @@ public class TokenDb {
             // UTF-8 is always defined
         }
     }
+
+    /** Database types */
+    private enum DbType {
+        NRS,                    // NRS database
+        H2                      // External H2 database
+    }
+
+    /** Database type */
+    private static DbType dbType = DbType.NRS;
+
+    /** Database URL */
+    private static String dbURL;
+
+    /** Database user */
+    private static String dbUser;
+
+    /** Database password */
+    private static String dbPassword;
+
+    /** Filtered factory */
+    private static final FilteredFactory dbFactory = new DbFactory();
+
+    /** All database connections */
+    private static final List<DbConnection> allConnections = new ArrayList<>();
+
+    /** Cached database connections */
+    private static final List<DbConnection> cachedConnections = new ArrayList<>();
+
+    /** Local connection cache */
+    private static final ThreadLocal<DbConnection> localConnection = new ThreadLocal<>();
 
     /** Database schema name */
     private static final String DB_SCHEMA = "TOKEN_EXCHANGE_4";
@@ -219,6 +252,23 @@ public class TokenDb {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Shutdown the database
+     */
+    static void shutdown() {
+        synchronized(allConnections) {
+            for (DbConnection conn : allConnections) {
+                try {
+                    conn.doClose();
+                } catch (Exception exc) {
+                    Logger.logErrorMessage("Unable to close database connection", exc);
+                }
+            }
+            allConnections.clear();
+            cachedConnections.clear();
         }
     }
 
@@ -1040,7 +1090,28 @@ public class TokenDb {
      * @throws  SQLException    Error occurred
      */
     static Connection getConnection() throws SQLException {
-        return Db.db.getConnection();
+        Connection conn;
+        switch (dbType) {
+            case NRS:
+                conn = Db.db.getConnection();
+                break;
+            case H2:
+                conn = localConnection.get();
+                if (conn == null) {
+                    synchronized(allConnections) {
+                        if (!cachedConnections.isEmpty()) {
+                            conn = cachedConnections.remove(cachedConnections.size() - 1);
+                        } else {
+                            conn = new DbConnection(DriverManager.getConnection(dbURL, dbUser, dbPassword));
+                            allConnections.add((DbConnection)conn);
+                        }
+                    }
+                }
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported database type");
+        }
+        return conn;
     }
 
     /**
@@ -1049,16 +1120,44 @@ public class TokenDb {
      * @return                  TRUE if database transaction started
      */
     static boolean isInTransaction() {
-        return Db.db.isInTransaction();
+        boolean inTransaction = false;
+        switch (dbType) {
+            case NRS:
+                inTransaction = Db.db.isInTransaction();
+                break;
+            case H2:
+                inTransaction = (localConnection.get() != null);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported database type");
+        }
+        return inTransaction;
     }
 
     /**
      * Start a database transaction
      *
      * @return                  Database connection
+     * @throws  SQLException    Error occurred
      */
-    static Connection beginTransaction() {
-        return Db.db.beginTransaction();
+    static Connection beginTransaction() throws SQLException {
+        Connection conn;
+        switch (dbType) {
+            case NRS:
+                conn = Db.db.beginTransaction();
+                break;
+            case H2:
+                if (localConnection.get() != null) {
+                    throw new IllegalStateException("Transaction already started");
+                }
+                conn = getConnection();
+                localConnection.set((DbConnection)conn);
+                conn.setAutoCommit(false);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported database type");
+        }
+        return conn;
     }
 
     /**
@@ -1067,23 +1166,47 @@ public class TokenDb {
      * @throws  SQLException    Database error occurred
      */
     static void commitTransaction() throws SQLException {
-        try {
-            Db.db.commitTransaction();
-        } catch (Exception exc) {
-            throw new SQLException("Unable to commit database transaction", exc);
+        switch (dbType) {
+            case NRS:
+                try {
+                    Db.db.commitTransaction();
+                } catch (Exception exc) {
+                    throw new SQLException("Unable to commit database transaction", exc);
+                }
+                break;
+            case H2:
+                Connection conn = localConnection.get();
+                if (conn == null) {
+                    throw new IllegalStateException("Transaction not started");
+                }
+                conn.commit();
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported database type");
         }
     }
 
     /**
      * Rollback a database transaction
-     *
-     * @throws  SQLException    Database error occurred
      */
-    static void rollbackTransaction() throws SQLException {
+    static void rollbackTransaction() {
         try {
-            Db.db.rollbackTransaction();
+            switch (dbType) {
+                case NRS:
+                    Db.db.rollbackTransaction();
+                    break;
+                case H2:
+                    Connection conn = localConnection.get();
+                    if (conn == null) {
+                        throw new IllegalStateException("Transaction not started");
+                    }
+                    conn.rollback();
+                    break;
+                default:
+                    throw new UnsupportedOperationException("Unsupported database type");
+            }
         } catch (Exception exc) {
-            throw new SQLException("Unable to rollback database transaction", exc);
+            Logger.logErrorMessage("Unable to rollback database transaction", exc);
         }
     }
 
@@ -1091,6 +1214,84 @@ public class TokenDb {
      * End a database connection
      */
     static void endTransaction() {
-        Db.db.endTransaction();
+        try {
+            switch (dbType) {
+                case NRS:
+                    Db.db.endTransaction();
+                    break;
+                case H2:
+                    Connection conn = localConnection.get();
+                    if (conn == null) {
+                        throw new IllegalStateException("Transaction not started");
+                    }
+                    conn.setAutoCommit(true);
+                    localConnection.set(null);
+                    synchronized(allConnections) {
+                        cachedConnections.add((DbConnection)conn);
+                    }
+                    break;
+                default:
+                    throw new UnsupportedOperationException("Unsupported database type");
+            }
+        } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to end database transaction", exc);
+        }
+    }
+
+    /**
+     * Filtered factory
+     *
+     * We don't need to filter statements, so we will just return
+     * the original statements
+     */
+    private static class DbFactory implements FilteredFactory {
+
+        @Override
+        public Statement createStatement(Statement stmt) {
+            return stmt;
+        }
+
+        @Override
+        public PreparedStatement createPreparedStatement(PreparedStatement stmt, String sql) {
+            return stmt;
+        }
+    }
+
+    /**
+     * Database connection
+     *
+     * Wrap the JDBC connection so that we can intercept some of the methods.
+     * The connection can be used in auto-commit mode or as part of a database
+     * transaction.
+     */
+    private static class DbConnection extends FilteredConnection {
+
+        private DbConnection(Connection conn) {
+            super(conn, dbFactory);
+        }
+
+        @Override
+        public void setAutoCommit(boolean autoCommit) throws SQLException {
+            if (localConnection.get() != this) {
+                throw new UnsupportedOperationException("Use TokenDb.beginTransaction() to start a new transaction");
+            }
+            super.setAutoCommit(autoCommit);
+        }
+
+        @Override
+        public void close() throws SQLException {
+            if (localConnection.get() == null) {
+                synchronized(allConnections) {
+                    super.setAutoCommit(true);
+                    cachedConnections.add(this);
+                }
+            } else if (this != localConnection.get()) {
+                throw new IllegalStateException("Previous connection not committed");
+            }
+        }
+
+        public void doClose() throws SQLException {
+            super.close();
+        }
     }
 }

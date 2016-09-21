@@ -29,7 +29,6 @@ import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Peer;
 import org.bitcoinj.core.PeerAddress;
 import org.bitcoinj.core.PeerGroup;
-import org.bitcoinj.core.ScriptException;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
@@ -491,9 +490,9 @@ public class BitcoinWallet {
      * @param   newBlocks       List of blocks in the new fork (highest to lowest height)
      */
     private static void processReorganization(StoredBlock splitPoint, List<StoredBlock> newBlocks) {
-        TokenDb.beginTransaction();
         obtainLock();
         try {
+            TokenDb.beginTransaction();
             //
             // Deactivate transactions in the old fork
             //
@@ -516,11 +515,7 @@ public class BitcoinWallet {
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to process Bitcoin block chain fork at height "
                     + splitPoint.getHeight(), exc);
-            try {
-                TokenDb.rollbackTransaction();
-            } catch (Exception exc1) {
-                Logger.logErrorMessage(exc1.toString());
-            }
+            TokenDb.rollbackTransaction();
         } finally {
             releaseLock();
             TokenDb.endTransaction();
@@ -560,9 +555,9 @@ public class BitcoinWallet {
         // Our change outputs are ignored since they are already
         // in the unspent transaction output table.
         //
-        TokenDb.beginTransaction();
         obtainLock();
         try {
+            TokenDb.beginTransaction();
             //
             // Remove transaction from broadcast table if it is one of ours
             //
@@ -615,11 +610,7 @@ public class BitcoinWallet {
             walletBalance += unspentBalance;
         } catch (Exception exc) {
             Logger.logErrorMessage("Unable to process Bitcoin transaction " + txHash + ", transaction ignored", exc);
-            try {
-                TokenDb.rollbackTransaction();
-            } catch (Exception exc1) {
-                Logger.logErrorMessage(exc1.toString());
-            }
+            TokenDb.rollbackTransaction();
         } finally {
             releaseLock();
             TokenDb.endTransaction();
@@ -739,10 +730,9 @@ public class BitcoinWallet {
      * @throws  SQLException    Database error occurred
      */
     static DeterministicKey getNewKey(DeterministicKey parentKey) throws SQLException {
-        DeterministicKey key = null;
         ChildNumber child = TokenDb.getNewChild(parentKey.getChildNumber());
         List<ChildNumber> path = HDUtils.append(parentKey.getPath(), child);
-        key = hierarchy.get(path, false, true);
+        DeterministicKey key = hierarchy.get(path, false, true);
         if (parentKey == externalParentKey) {
             Address address = key.toAddress(params);
             ReceiveAddress receiveAddress = new ReceiveAddress(address, child, parentKey.getChildNumber());
@@ -868,9 +858,9 @@ public class BitcoinWallet {
      */
     static String sendCoins(Address toAddress, BigDecimal coins, boolean emptyWallet) {
         String transactionId = null;
-        TokenDb.beginTransaction();
         obtainLock();
         try {
+            TokenDb.beginTransaction();
             long amount = emptyWallet ? walletBalance : coins.movePointRight(8).longValue();
             if (amount < Transaction.MIN_NONDUST_OUTPUT.getValue()) {
                 throw new IllegalArgumentException("Transaction amount is too small");
@@ -1008,11 +998,7 @@ public class BitcoinWallet {
             Logger.logInfoMessage("Broadcast Bitcoin transaction " + transactionId + " for "
                     + BigDecimal.valueOf(amount, 8).stripTrailingZeros().toPlainString() + " BTC");
         } catch (Exception exc) {
-            try {
-                TokenDb.rollbackTransaction();
-            } catch (Exception exc1) {
-                Logger.logErrorMessage("Unable to rollback transaction", exc1);
-            }
+            TokenDb.rollbackTransaction();
             throw new RuntimeException(exc.getMessage(), exc);
         } finally {
             releaseLock();

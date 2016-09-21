@@ -338,6 +338,7 @@ public class TokenAddon implements AddOn, Listener<Block> {
             BitcoinWallet.shutdown();
             initialized = false;
         }
+        TokenDb.shutdown();
         Logger.logInfoMessage("TokenExchange stopped");
     }
 
