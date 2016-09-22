@@ -33,11 +33,15 @@ The token-exchange.properties configuration file controls the operation of Token
     A local Bitcoin server will be used if one is found.  If there is no local server, then the server specified by this field will be used.  A set of random servers will be selected if this field is not specified.
     
 - dbType=type    
-    - NRS specifies the database managed by the NRS server and is the default.
-    - H2 specifies a database managed by a separate H2 database server.
+    - NRS specifies the database managed by the NRS server and is the default.    
+    - H2 specifies a database managed by a separate H2 database server.    
+    - POSTGRESQL specifies a database managed by a separate PostgreSQL database server.    
 
 - dbURL=url   
-    This specifies the URL used to connect to an external database server and is ignored for the NRS database.  The URL format is defined by the external database server.  For an H2 server, the format is 'jdbc:h2:tcp://host:port/db-path'.
+    This specifies the URL used to connect to an external database server and is ignored for the NRS database.  The URL format is defined by the external database server.  
+    - H2 server: jdbc:h2:tcp://host:port/db-path (uses TCP/IP connection)    
+    - Local PostgreSQL server: jdbc:postgresql:database (uses Unix socket connection)    
+    - Remote PostgreSQL server: jdbc:postgresql://host:port/database (uses TCP/IP connection)    
     
 - dbUser=user    
     This specifies the user for a connection to an external database server and is ignored for the NRS database.

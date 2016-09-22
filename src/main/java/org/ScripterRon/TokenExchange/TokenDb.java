@@ -60,7 +60,8 @@ public class TokenDb {
     /** Database types */
     private enum DbType {
         NRS,                    // NRS database
-        H2                      // External H2 database
+        H2,                     // External H2 database
+        POSTGRESQL              // External PostgreSQL database
     }
 
     /** Database type */
@@ -74,6 +75,12 @@ public class TokenDb {
 
     /** Database password */
     private static String dbPassword;
+
+    /** BINARY data type */
+    private static String binaryType = "BINARY";
+
+    /** Initial seed value */
+    private static String initialSeed = "x'0000'";
 
     /** Filtered factory */
     private static final FilteredFactory dbFactory = new DbFactory();
@@ -117,7 +124,7 @@ public class TokenDb {
     /** Control table definitions */
     private static final String controlTableDefinition = "CREATE TABLE IF NOT EXISTS " + CONTROL_TABLE  + " ("
             + "db_version INT NOT NULL,"            // Database version
-            + "creation_time LONG NOT NULL,"        // Database creation time (seconds since Unix epoch)
+            + "creation_time BIGINT NOT NULL,"      // Database creation time (seconds since Unix epoch)
             + "seed BINARY NOT NULL,"               // Encoded deterministic seed
             + "exchange_rate BIGINT NOT NULL,"      // Exchange rate
             + "wallet_key INT NOT NULL,"            // Wallet key identifier
@@ -129,32 +136,32 @@ public class TokenDb {
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
             + "child_number INT NOT NULL,"          // External key child number
             + "account_id BIGINT NOT NULL,"         // Nxt account identifier
-            + "public_key BINARY(32),"              // Nxt account public key
+            + "public_key BINARY,"                  // Nxt account public key
             + "timestamp INT NOT NULL)";            // Timestamp
     private static final String accountIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
-                    + ACCOUNT_TABLE + "_idx1 ON " + ACCOUNT_TABLE + "(bitcoin_address)";
+                    + "account_idx1 ON " + ACCOUNT_TABLE + "(bitcoin_address)";
     private static final String accountIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
-                    + ACCOUNT_TABLE + "_idx2 ON " + ACCOUNT_TABLE + "(account_id)";
+                    + "account_idx2 ON " + ACCOUNT_TABLE + "(account_id)";
 
     /** Transaction broadcast table definitions */
     private static final String broadcastTableDefinition = "CREATE TABLE IF NOT EXISTS " + BROADCAST_TABLE + " ("
-            + "txid BINARY(32) NOT NULL,"           // Transaction identifier
+            + "txid BINARY NOT NULL,"               // Transaction identifier
             + "payload BINARY NOT NULL)";           // Transaction payload
 
     /** Unspent Bitcoin transaction outputs */
     private static final String unspentTableDefinition = "CREATE TABLE IF NOT EXISTS " + UNSPENT_TABLE + " ("
-            + "txid BINARY(32) NOT NULL,"           // Transaction identifier
+            + "txid BINARY NOT NULL,"               // Transaction identifier
             + "index INT NOT NULL,"                 // Output index
-            + "blkid BINARY(32) NOT NULL,"          // Block identifier
+            + "blkid BINARY NOT NULL,"              // Block identifier
             + "amount BIGINT NOT NULL,"             // Bitcoin amount
             + "child_number INT NOT NULL,"          // Determinstic key child number
             + "parent_number INT NOT NULL,"         // Deterministic key parent number
             + "spent BOOLEAN NOT NULL,"             // Output has been spent
             + "height INT NOT NULL)";               // Block chain height
     private static final String unspentIndexDefinition1 = "CREATE INDEX IF NOT EXISTS "
-                    + UNSPENT_TABLE + "_idx1 ON " + UNSPENT_TABLE + "(spent,height)";
+                    + "unspent_idx1 ON " + UNSPENT_TABLE + "(spent,height)";
     private static final String unspentIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
-                    + UNSPENT_TABLE + "_idx2 ON " + UNSPENT_TABLE + "(txid)";
+                    + "unspent_idx2 ON " + UNSPENT_TABLE + "(txid)";
 
     /** Nxt transaction table definitions */
     private static final String nxtTableDefinition = "CREATE TABLE IF NOT EXISTS " + NXT_TABLE + " ("
@@ -166,18 +173,18 @@ public class TokenDb {
             + "token_amount BIGINT NOT NULL,"       // Number of units redeemed / Database version
             + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
-            + "bitcoin_txid BINARY(32))";           // Bitcoin transaction identifier
+            + "bitcoin_txid BINARY)";               // Bitcoin transaction identifier
     private static final String nxtIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
-                    + NXT_TABLE + "_idx1 ON " + NXT_TABLE + "(nxt_txid)";
+                    + "nxt_idx1 ON " + NXT_TABLE + "(nxt_txid)";
     private static final String nxtIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
-                    + NXT_TABLE + "_idx2 ON " + NXT_TABLE + "(exchanged)";
+                    + "nxt_idx2 ON " + NXT_TABLE + "(exchanged)";
 
     /** Bitcoin transaction table definitions */
     private static final String bitcoinTableDefinition = "CREATE TABLE IF NOT EXISTS " + BITCOIN_TABLE + " ("
             + "height INT NOT NULL,"                // Bitcoin block chain height (0 if not in chain yet)
             + "timestamp INT NOT NULL,"             // Bitcoin transaction timestamp (0 if not in chain yet)
-            + "bitcoin_txid BINARY(32) NOT NULL,"   // Bitcoin transaction identifier
-            + "bitcoin_blkid BINARY(32) NOT NULL,"  // Bitcoin block identifier
+            + "bitcoin_txid BINARY NOT NULL,"       // Bitcoin transaction identifier
+            + "bitcoin_blkid BINARY NOT NULL,"      // Bitcoin block identifier
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
             + "account_id BIGINT NOT NULL,"         // Nxt account identifier
             + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
@@ -185,9 +192,9 @@ public class TokenDb {
             + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency has been issued
             + "nxt_txid BIGINT NOT NULL)";          // Nxt transaction identifier
     private static final String bitcoinIndexDefinition1 = "CREATE INDEX IF NOT EXISTS "
-                    + BITCOIN_TABLE + "_idx1 ON " + BITCOIN_TABLE + "(bitcoin_txid)";
+                    + "bitcoin_idx1 ON " + BITCOIN_TABLE + "(bitcoin_txid)";
     private static final String bitcoinIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
-                    + BITCOIN_TABLE + "_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
+                    + "bitcoin_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
 
     /**
      * Initialize the database support
@@ -204,6 +211,10 @@ public class TokenDb {
             dbType = DbType.NRS;
         } else if (type.equals("H2")) {
             dbType = DbType.H2;
+        } else if (type.equals("POSTGRESQL")) {
+            dbType = DbType.POSTGRESQL;
+            binaryType = "BYTEA";
+            initialSeed = "decode('0000','hex')";
         } else {
             throw new IllegalArgumentException("Database type '" + type + "' is not valid");
         }
@@ -244,22 +255,22 @@ public class TokenDb {
                 case 0:
                     Logger.logInfoMessage("Creating new TokenExchange database");
                     stmt.execute(schemaDefinition);
-                    stmt.execute(controlTableDefinition);
+                    stmt.execute(controlTableDefinition.replace("BINARY", binaryType));
                     stmt.executeUpdate("INSERT INTO " + CONTROL_TABLE
                         + " (db_version,creation_time,seed,exchange_rate,wallet_key,external_key,internal_key)"
-                        + " VALUES(1," + System.currentTimeMillis()/1000 + ",x'0000',"
+                        + " VALUES(1," + System.currentTimeMillis()/1000 + "," + initialSeed +  ","
                         + TokenAddon.exchangeRate.movePointRight(8).toPlainString() + ",0,1,0)");
-                    stmt.execute(unspentTableDefinition);
+                    stmt.execute(unspentTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(unspentIndexDefinition1);
                     stmt.execute(unspentIndexDefinition2);
-                    stmt.execute(broadcastTableDefinition);
-                    stmt.execute(accountTableDefinition);
+                    stmt.execute(broadcastTableDefinition.replace("BINARY", binaryType));
+                    stmt.execute(accountTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(accountIndexDefinition1);
                     stmt.execute(accountIndexDefinition2);
-                    stmt.execute(nxtTableDefinition);
+                    stmt.execute(nxtTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(nxtIndexDefinition1);
                     stmt.execute(nxtIndexDefinition2);
-                    stmt.execute(bitcoinTableDefinition);
+                    stmt.execute(bitcoinTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(bitcoinIndexDefinition1);
                     stmt.execute(bitcoinIndexDefinition2);
                     //
@@ -1124,6 +1135,7 @@ public class TokenDb {
                 conn = Db.db.getConnection();
                 break;
             case H2:
+            case POSTGRESQL:
                 conn = localConnection.get();
                 if (conn == null) {
                     synchronized(allConnections) {
@@ -1155,6 +1167,7 @@ public class TokenDb {
                 inTransaction = Db.db.isInTransaction();
                 break;
             case H2:
+            case POSTGRESQL:
                 inTransaction = (localConnection.get() != null);
                 break;
             default:
@@ -1176,6 +1189,7 @@ public class TokenDb {
                 conn = Db.db.beginTransaction();
                 break;
             case H2:
+            case POSTGRESQL:
                 if (localConnection.get() != null) {
                     throw new IllegalStateException("Transaction already started");
                 }
@@ -1204,6 +1218,7 @@ public class TokenDb {
                 }
                 break;
             case H2:
+            case POSTGRESQL:
                 Connection conn = localConnection.get();
                 if (conn == null) {
                     throw new IllegalStateException("Transaction not started");
@@ -1225,6 +1240,7 @@ public class TokenDb {
                     Db.db.rollbackTransaction();
                     break;
                 case H2:
+                case POSTGRESQL:
                     Connection conn = localConnection.get();
                     if (conn == null) {
                         throw new IllegalStateException("Transaction not started");
@@ -1249,6 +1265,7 @@ public class TokenDb {
                     Db.db.endTransaction();
                     break;
                 case H2:
+                case POSTGRESQL:
                     Connection conn = localConnection.get();
                     if (conn == null) {
                         throw new IllegalStateException("Transaction not started");
