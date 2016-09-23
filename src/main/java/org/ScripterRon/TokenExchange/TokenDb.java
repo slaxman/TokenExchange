@@ -288,8 +288,10 @@ public class TokenDb {
                     stmt.execute(bitcoinIndexDefinition1);
                     stmt.execute(bitcoinIndexDefinition2);
                 case 1:
-                    stmt.execute("ALTER TABLE " + CONTROL_TABLE
-                            + " ADD COLUMN chain_head BINARY AFTER internal_key".replace("BINARY", binaryType));
+                    if (version == 1) {
+                        stmt.execute("ALTER TABLE " + CONTROL_TABLE
+                                + " ADD COLUMN chain_head BINARY".replace("BINARY", binaryType));
+                    }
                     stmt.execute(blockTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(blockIndexDefinition1);
                     //
