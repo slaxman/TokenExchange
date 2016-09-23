@@ -428,11 +428,11 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
                 }
                 try {
                     height = Integer.valueOf(heightString);
-                    if (BitcoinWallet.getChainHeight() - height > BitcoinWallet.getMaxRollback()) {
-                        return incorrect("height", "The requested height is not in the block chain cache");
+                    if (height < 0) {
+                        return incorrect("height", "The requested height is not valid");
                     }
-                    BitcoinWallet.rollbackChain(height);
-                    response.put("completed", true);
+                    boolean success = BitcoinWallet.rollbackChain(height);
+                    response.put("completed", success);
                 } catch (NumberFormatException exc) {
                     return incorrect("height", exc.getMessage());
                 } catch (Exception exc) {

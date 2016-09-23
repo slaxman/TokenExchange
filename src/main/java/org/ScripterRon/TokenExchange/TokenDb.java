@@ -21,7 +21,10 @@ import nxt.db.FilteredFactory;
 import nxt.util.Logger;
 
 import org.bitcoinj.core.Context;
+import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.ProtocolException;
+import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.crypto.ChildNumber;
@@ -115,8 +118,11 @@ public class TokenDb {
     /** Bitcoin transaction table name */
     private static final String BITCOIN_TABLE = DB_SCHEMA + ".bitcoin";
 
+    /** Bitcoin block store table name */
+    private static final String BLOCK_TABLE = DB_SCHEMA + ".block";
+
     /** Current database version */
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
 
     /** Schema definition */
     private static final String schemaDefinition = "CREATE SCHEMA IF NOT EXISTS " + DB_SCHEMA;
@@ -129,7 +135,8 @@ public class TokenDb {
             + "exchange_rate BIGINT NOT NULL,"      // Exchange rate
             + "wallet_key INT NOT NULL,"            // Wallet key identifier
             + "external_key INT NOT NULL,"          // Next external key identifier
-            + "internal_key INT NOT NULL)";         // Next internal key identifier
+            + "internal_key INT NOT NULL,"          // Next internal key identifier
+            + "chain_head BINARY)";                 // Block chain head */
 
     /** Account table definitions */
     private static final String accountTableDefinition = "CREATE TABLE IF NOT EXISTS " + ACCOUNT_TABLE + " ("
@@ -195,6 +202,13 @@ public class TokenDb {
                     + "bitcoin_idx1 ON " + BITCOIN_TABLE + "(bitcoin_txid)";
     private static final String bitcoinIndexDefinition2 = "CREATE INDEX IF NOT EXISTS "
                     + "bitcoin_idx2 ON " + BITCOIN_TABLE + "(exchanged)";
+
+    /** Bitcoin block store table definitions */
+    private static final String blockTableDefinition = "CREATE TABLE IF NOT EXISTS " + BLOCK_TABLE + " ("
+            + "blkid BINARY NOT NULL,"              // Block identifier
+            + "bytes BINARY NOT NULL)";             // Serialized block
+    private static final String blockIndexDefinition1 = "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    + "block_idx1 ON " + BLOCK_TABLE + "(blkid)";
 
     /**
      * Initialize the database support
@@ -273,6 +287,11 @@ public class TokenDb {
                     stmt.execute(bitcoinTableDefinition.replace("BINARY", binaryType));
                     stmt.execute(bitcoinIndexDefinition1);
                     stmt.execute(bitcoinIndexDefinition2);
+                case 1:
+                    stmt.execute("ALTER TABLE " + CONTROL_TABLE
+                            + " ADD COLUMN chain_head BINARY AFTER internal_key".replace("BINARY", binaryType));
+                    stmt.execute(blockTableDefinition.replace("BINARY", binaryType));
+                    stmt.execute(blockIndexDefinition1);
                     //
                     // Add new database version processing here
                     //
@@ -1118,6 +1137,105 @@ public class TokenDb {
                         + " SET height=? WHERE exchanged=false AND bitcoin_blkid=?")) {
             stmt.setInt(1, height);
             stmt.setBytes(2, blkid);
+            stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Get a block
+     *
+     * @param   params          Network parameters
+     * @param   hash            Block identifier
+     * @return                  Block or null if not found
+     * @throws  SQLException    Error occurred
+     */
+    static StoredBlock getBlock(NetworkParameters params, Sha256Hash hash) throws SQLException {
+        StoredBlock block = null;
+        try (Connection conn = getConnection();
+                PreparedStatement stmt = conn.prepareStatement("SELECT bytes FROM " + BLOCK_TABLE
+                        + " WHERE blkid=?")) {
+            stmt.setBytes(1, hash.getBytes());
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    byte[] bytes = rs.getBytes(1);
+                    ByteBuffer buf = ByteBuffer.wrap(bytes);
+                    buf.order(ByteOrder.LITTLE_ENDIAN);
+                    block = StoredBlock.deserializeCompact(params, buf);
+                }
+            } catch (ProtocolException exc) {
+                throw new SQLException("Unable to deserialize Bitcoin block", exc);
+            }
+        }
+        return block;
+    }
+
+    /**
+     * Get the chain head
+     *
+     * @param   params          Network parameters
+     * @return                  Block or null
+     * @throws  SQLException    Error occurred
+     */
+    static StoredBlock getChainHead(NetworkParameters params) throws SQLException {
+        StoredBlock block = null;
+        try (Connection conn = getConnection();
+                PreparedStatement stmt1 = conn.prepareStatement("SELECT chain_head FROM " + CONTROL_TABLE);
+                PreparedStatement stmt2 = conn.prepareStatement("SELECT bytes FROM " + BLOCK_TABLE
+                        + " WHERE blkid=?")) {
+            byte[] chainHead = null;
+            try (ResultSet rs = stmt1.executeQuery()) {
+                if (rs.next()) {
+                    chainHead = rs.getBytes(1);
+                }
+            }
+            if (chainHead != null) {
+                stmt2.setBytes(1, chainHead);
+                try (ResultSet rs = stmt2.executeQuery()) {
+                    if (rs.next()) {
+                        byte[] bytes = rs.getBytes(1);
+                        ByteBuffer buf = ByteBuffer.wrap(bytes);
+                        buf.order(ByteOrder.LITTLE_ENDIAN);
+                        block = StoredBlock.deserializeCompact(params, buf);
+                    }
+                } catch (ProtocolException exc) {
+                    throw new SQLException("Unable to deserialize Bitcoin block", exc);
+                }
+            }
+        }
+        return block;
+    }
+
+    /**
+     * Store a block
+     *
+     * @param   block           Block to store
+     * @throws  SQLException    Error occurred
+     */
+    static void storeBlock(StoredBlock block) throws SQLException {
+        try (Connection conn = getConnection();
+                PreparedStatement stmt = conn.prepareStatement("INSERT INTO " + BLOCK_TABLE
+                        + " (blkid,bytes) VALUES(?,?)")) {
+            byte[] bytes = new byte[StoredBlock.COMPACT_SERIALIZED_SIZE];
+            ByteBuffer buf = ByteBuffer.wrap(bytes);
+            buf.order(ByteOrder.LITTLE_ENDIAN);
+            block.serializeCompact(buf);
+            stmt.setBytes(1, block.getHeader().getHash().getBytes());
+            stmt.setBytes(2, bytes);
+            stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Set the chain head
+     *
+     * @param   block           Chain head block
+     * @throws  SQLException    Error occurred
+     */
+    static void setChainHead(StoredBlock block) throws SQLException {
+        try (Connection conn = getConnection();
+                PreparedStatement stmt = conn.prepareStatement("UPDATE " + CONTROL_TABLE
+                        + " SET chain_head=?")) {
+            stmt.setBytes(1, block.getHeader().getHash().getBytes());
             stmt.executeUpdate();
         }
     }

@@ -49,7 +49,6 @@ import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.store.BlockStore;
 import org.bitcoinj.store.BlockStoreException;
-import org.bitcoinj.store.SPVBlockStore;
 import org.bitcoinj.utils.Threading;
 import org.bitcoinj.wallet.DeterministicSeed;
 
@@ -196,8 +195,7 @@ public class BitcoinWallet {
             //
             // Create the block store
             //
-            File storeFile = new File(walletDirectory, "spvchain.dat");
-            blockStore = new SPVBlockStore(params, storeFile);
+            blockStore = new BitcoinBlockStore(params);
             //
             // Create the block chain
             //
@@ -809,15 +807,6 @@ public class BitcoinWallet {
      */
     static List<Peer> getConnectedPeers() {
         return peerGroup.getConnectedPeers();
-    }
-
-    /**
-     * Get the maximum block chain rollback
-     *
-     * @return                  Maximum rollback
-     */
-    static int getMaxRollback() {
-        return SPVBlockStore.DEFAULT_NUM_HEADERS;
     }
 
     /**
