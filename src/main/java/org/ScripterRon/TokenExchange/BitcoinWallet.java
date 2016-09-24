@@ -48,7 +48,6 @@ import org.bitcoinj.params.MainNetParams;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.store.BlockStore;
-import org.bitcoinj.store.BlockStoreException;
 import org.bitcoinj.utils.Threading;
 import org.bitcoinj.wallet.DeterministicSeed;
 
@@ -117,7 +116,7 @@ public class BitcoinWallet {
     private static BlockStore blockStore;
 
     /** Block chain */
-    private static RollbackBlockChain blockChain;
+    private static BitcoinBlockChain blockChain;
 
     /** Wallet peer group */
     private static PeerGroup peerGroup;
@@ -199,7 +198,7 @@ public class BitcoinWallet {
             //
             // Create the block chain
             //
-            blockChain = new RollbackBlockChain(context, blockStore);
+            blockChain = new BitcoinBlockChain(context, blockStore, TokenDb.getCreationTime());
             blockChain.addNewBestBlockListener(Threading.SAME_THREAD, (block) -> {
                 propagateContext();
                 if (!TokenAddon.isSuspended()) {
@@ -262,34 +261,6 @@ public class BitcoinWallet {
             Logger.logErrorMessage("Unable to initialize the Bitcoin wallet", exc);
         }
         return walletInitialized;
-    }
-
-    /**
-     * Block chain with rollback support
-     */
-    private static class RollbackBlockChain extends BlockChain {
-
-        /**
-         * Create the block chain
-         *
-         * @param   context                 BitcoinJ context
-         * @param   blockStore              Associated block store
-         * @throws  BlockStoreException     Error occurred creating the block chain
-         */
-        RollbackBlockChain(Context context, BlockStore blockStore) throws BlockStoreException {
-            super(context, blockStore);
-        }
-
-        /**
-         * Roll back the block chain
-         *
-         * @param   height                  Desired height
-         * @throws  BlockStoreException     Unable to rollback the block chain
-         */
-        public void rollback(int height) throws BlockStoreException {
-            rollbackBlockStore(height);
-            Logger.logInfoMessage("Bitcoin block chain rollback to height " + height + " completed");
-        }
     }
 
     /**
@@ -430,14 +401,17 @@ public class BitcoinWallet {
         //
         // Create the peer group
         //
-        // Set the fast catch-up time to the database creation time - 2 hours.  We do
-        // this to make sure we get some recent full blocks when we first start (only
-        // the blocks headers are downloaded before the catch-up time)
+        // Set the fast catch-up time to the database creation time if we are downloading
+        // the initial block chain.  This will cause just the block headers to be downloaded
+        // instead of the full blocks until the creation time is reached.
         //
         peerGroup = new PeerGroup(context, blockChain);
         peerGroup.setUserAgent(TokenAddon.applicationName, TokenAddon.applicationVersion);
         peerGroup.setUseLocalhostPeerWhenPossible(true);
-        peerGroup.setFastCatchupTimeSecs(TokenDb.getCreationTime() - 2 * 60 * 60);
+        long creationTime = TokenDb.getCreationTime();
+        if (blockChain.getChainHead().getHeader().getTimeSeconds() < creationTime - 24 * 60 * 60) {
+            peerGroup.setFastCatchupTimeSecs(creationTime);
+        }
         peerGroup.addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, msg) -> {
             propagateContext();
             if (msg instanceof AddressMessage) {

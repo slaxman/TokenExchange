@@ -25,7 +25,9 @@ import org.bitcoinj.store.BlockStoreException;
 /**
  * Bitcoin block store
  *
- * Blocks are stored in a SQL table
+ * Blocks are stored in a SQL table.  The block header, block height, and cumulative
+ * work are stored.  Block transactions are not stored and are not available when
+ * a block is retrieved from the block store.
  */
 public class BitcoinBlockStore implements BlockStore {
 
