@@ -1210,6 +1210,13 @@ public class TokenDb {
     /**
      * Store a block
      *
+     * During a block chain reorganization, an existing block can be stored again if it
+     * is part of the new block chain.  We can't use MERGE instead of INSERT because
+     * PostgreSQL doesn't support it.  So we will attempt the INSERT first.  If it
+     * fails, we will verify that the block exists.  If the block exists, we will
+     * ignore the error since the block itself doesn't change as a result of a
+     * reorganization.
+     *
      * @param   block           Block to store
      * @throws  SQLException    Error occurred
      */
@@ -1224,6 +1231,23 @@ public class TokenDb {
             stmt.setBytes(1, block.getHeader().getHash().getBytes());
             stmt.setBytes(2, bytes);
             stmt.executeUpdate();
+        } catch (SQLException exc) {
+            boolean found = false;
+            try (Connection conn = getConnection();
+                    PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM " + BLOCK_TABLE
+                        + " WHERE blkid=?")) {
+                stmt.setBytes(1, block.getHeader().getHash().getBytes());
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        found = true;
+                    }
+                }
+            } catch (SQLException exc1) {
+                // Ignore this exception since we will throw the original exception
+            }
+            if (!found) {
+                throw exc;
+            }
         }
     }
 

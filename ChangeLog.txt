@@ -4,6 +4,7 @@ TokenExchange Change Log
 Version 4.1.0
   - Move block store to database table
   - Verify transactions within a new block
+  - BitcoinJ will store an existing block during reorganization
 
 Version 4.0.0
   - Initial release
