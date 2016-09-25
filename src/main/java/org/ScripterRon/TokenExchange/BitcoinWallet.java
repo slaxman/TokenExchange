@@ -408,9 +408,9 @@ public class BitcoinWallet {
         peerGroup = new PeerGroup(context, blockChain);
         peerGroup.setUserAgent(TokenAddon.applicationName, TokenAddon.applicationVersion);
         peerGroup.setUseLocalhostPeerWhenPossible(true);
-        long creationTime = TokenDb.getCreationTime();
-        if (blockChain.getChainHead().getHeader().getTimeSeconds() < creationTime - 24 * 60 * 60) {
-            peerGroup.setFastCatchupTimeSecs(creationTime);
+        long catchUpTime = TokenDb.getCreationTime() - 24 * 60 * 60;
+        if (blockChain.getChainHead().getHeader().getTimeSeconds() < catchUpTime) {
+            peerGroup.setFastCatchupTimeSecs(catchUpTime);
         }
         peerGroup.addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, msg) -> {
             propagateContext();
