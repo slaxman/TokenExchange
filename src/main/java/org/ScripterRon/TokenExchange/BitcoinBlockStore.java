@@ -15,6 +15,8 @@
  */
 package org.ScripterRon.TokenExchange;
 
+import.nxt.util.Logger;
+
 import org.bitcoinj.core.Block;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
@@ -51,6 +53,7 @@ public class BitcoinBlockStore implements BlockStore {
                 setChainHead(genesisBlock);
             }
         } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to initialize the Bitcoin block store", exc);
             throw new BlockStoreException("Unable to initialize the Bitcoin block store", exc);
         }
     }
@@ -66,6 +69,8 @@ public class BitcoinBlockStore implements BlockStore {
         try {
             TokenDb.storeBlock(block);
         } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to store Bitcoin block "
+                    + block.getHeader().getHash() + " at height " + block.getHeight(), exc);
             throw new BlockStoreException("Unable to store Bitcoin block", exc);
         }
     }
@@ -83,6 +88,7 @@ public class BitcoinBlockStore implements BlockStore {
         try {
             block = TokenDb.getBlock(params, hash);
         } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to get Bitcoin block " + hash, exc);
             throw new BlockStoreException("Unable to get Bitcoin block", exc);
         }
         return block;
@@ -100,6 +106,7 @@ public class BitcoinBlockStore implements BlockStore {
         try {
             block = TokenDb.getChainHead(params);
         } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to get Bitcoin block chain head", exc);
             throw new BlockStoreException("Unable to get Bitcoin block chain head", exc);
         }
         return block;
@@ -116,6 +123,7 @@ public class BitcoinBlockStore implements BlockStore {
         try {
             TokenDb.setChainHead(chainHead);
         } catch (Exception exc) {
+            Logger.logErrorMessage("Unable to set Bitcoin block chain head", exc);
             throw new BlockStoreException("Unable to set Bitcoin block chain head", exc);
         }
     }
