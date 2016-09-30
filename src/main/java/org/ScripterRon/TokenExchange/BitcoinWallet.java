@@ -408,6 +408,7 @@ public class BitcoinWallet {
         peerGroup = new PeerGroup(context, blockChain);
         peerGroup.setUserAgent(TokenAddon.applicationName, TokenAddon.applicationVersion);
         peerGroup.setUseLocalhostPeerWhenPossible(true);
+        peerGroup.setStallThreshold(30, 1000);
         long catchUpTime = TokenDb.getCreationTime() - 24 * 60 * 60;
         if (blockChain.getChainHead().getHeader().getTimeSeconds() < catchUpTime) {
             peerGroup.setFastCatchupTimeSecs(catchUpTime);
