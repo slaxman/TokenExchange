@@ -15,7 +15,7 @@
  */
 package org.ScripterRon.TokenExchange;
 
-import.nxt.util.Logger;
+import nxt.util.Logger;
 
 import org.bitcoinj.core.Block;
 import org.bitcoinj.core.NetworkParameters;
