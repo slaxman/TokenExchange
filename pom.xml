@@ -9,7 +9,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
-        <nxtpeer.version>1.10.2</nxtpeer.version>
+        <nxt.version>1.10.3</nxt.version>
         <bitcoinj.version>0.15-SNAPSHOT-1</bitcoinj.version>
         <postgresql.version>9.4.1211.jre7</postgresql.version>
     </properties>
@@ -93,8 +93,8 @@
     <dependencies>
         <dependency>
             <groupId>org.ScripterRon</groupId>
-            <artifactId>NxtPeer</artifactId>
-            <version>${nxtpeer.version}</version>
+            <artifactId>nxt</artifactId>
+            <version>${nxt.version}</version>
         </dependency>
         <dependency>
             <groupId>org.bitcoinj</groupId>
