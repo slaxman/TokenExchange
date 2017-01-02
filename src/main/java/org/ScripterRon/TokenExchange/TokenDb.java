@@ -177,7 +177,7 @@ public class TokenDb {
             + "height INT NOT NULL,"                // Nxt transaction height
             + "timestamp INT NOT NULL,"             // Nxt transaction timestamp
             + "exchanged BOOLEAN NOT NULL,"         // TRUE if currency exchanged for Bitcoin
-            + "token_amount BIGINT NOT NULL,"       // Number of units redeemed / Database version
+            + "token_amount BIGINT NOT NULL,"       // Number of units redeemed
             + "bitcoin_amount BIGINT NOT NULL,"     // Bitcoin amount
             + "bitcoin_address VARCHAR NOT NULL,"   // Bitcoin address
             + "bitcoin_txid BINARY)";               // Bitcoin transaction identifier

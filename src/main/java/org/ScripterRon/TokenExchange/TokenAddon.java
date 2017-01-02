@@ -293,7 +293,6 @@ public class TokenAddon implements AddOn, Listener<Block> {
         }
     }
 
-
     /**
      * Finish TokenExchange initialization
      *
