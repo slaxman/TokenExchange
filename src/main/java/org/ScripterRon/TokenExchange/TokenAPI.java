@@ -117,7 +117,6 @@ public class TokenAPI extends APIServlet.APIRequestHandler {
         }
         BitcoinWallet.propagateContext();
         String heightString;
-        String idString;
         String includeExchangedString;
         String accountString;
         String publicKeyString;
